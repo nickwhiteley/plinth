@@ -45,8 +45,9 @@ its own schedule.
 | `env` | `internal/env` | The `.env` loader. It never overrides the environment, and reads values literally (no expansion or quotes). | 1.3 |
 | `settings` | `internal/settings` | Declared, encrypted settings rows, reconciled at boot, a three-minute snapshot, and the `/admin/settings` handler | 1.3 |
 | `alert` | `internal/alert` | Errors reported from the log handler, rate-limited and redacted | 1.3 |
-| `identity` | `internal/auth`, split | The provider interface, the local provider (password, Google, reset, verification), sessions and deletion events | 1.2 |
-| `account` | `internal/auth`, split | Accounts and their profile cache, keyed to an identity by (issuer, subject) | 1.2 |
+| `identity` | `internal/auth`, split | What a provider proves, and the local provider: passwords, reset and verification links, and Google sign-in (§12) | 1.2 |
+| `account` | `internal/auth`, split | Accounts, their profile cache and their sessions, keyed to an identity by (issuer, subject) (§12) | 1.2 |
+| `ids` | `internal/ids`, and Furniture Magic's `engine/ident` | UUIDv7, prefixed Crockford ids, and secret tokens (§7) | 1.2 |
 | `flags` | `internal/flags` | Feature flags by tier, with per-account overrides | 1.4 |
 | `quotas` | `internal/quotas` | Limits by tier with per-account overrides, and reservation | 1.4 |
 | `usage` | `internal/usage` | Metered usage counted against quotas | 1.4 |
@@ -165,12 +166,19 @@ mechanism. The product registers its own personal columns with it.
 
 ## 7. Identifiers
 
-- Keys are UUIDv7 in native `uuid` columns.
-- The API shows them as a prefix and Crockford base32, e.g. `acc_01M483M2YGE1CTRQSGT39SE6KV`.
-- `plinth` reserves its own prefixes (`acc_` for an account, `idn_` for an identity, `tie_` for a
-  tier), and a product registers its own.
-- A test refuses a prefix registered twice.
-- Secrets are never ids: tokens are stored as SHA-256 hashes, and are never shown as ids.
+Package `ids`:
+- Keys are UUIDv7 in native `uuid` columns. `ids.New` mints one from the clock and
+  `crypto/rand`.
+- The API shows them as a prefix and Crockford base32, e.g. `acc_01M483M2YGE1CTRQSGT39SE6KV`:
+  - 26 upper-case characters, the first no higher than `7`
+  - only the canonical form parses, so no two strings name one id
+  - a wrong prefix is refused with `id_kind`, and anything else malformed with `id_syntax`
+- **Prefixes are registered.** `plinth` registers its own (`acc` for an account, `idn` for a
+  local identity, `tie` for a tier), and a product registers its own at start-up.
+  `ids.Register` panics on a prefix registered twice, or one that isn't 2–4 lower-case letters.
+- **Secrets are never ids.** `ids.Token` is 32 random bytes, base64url without padding. Only
+  its SHA-256 (`ids.HashToken`, 32 bytes) is stored, so a database read yields nothing that
+  signs anyone in.
 
 ## 8. Configuration
 
@@ -216,7 +224,118 @@ mechanism. The product registers its own personal columns with it.
 - **Test first:** a lifted package arrives with its Bloomprint tests passing, and changes are
   driven by a failing test.
 
-## 12. Bloomprint's move onto `plinth`
+## 12. Identity and accounts
+
+Bloomprint's `auth` package does both jobs, so it's split in two. Its rules come across
+unchanged, and so do its tests.
+
+**`identity` proves who someone is.** It knows nothing about accounts or sessions.
+- **An `Identity`** is what a provider proves: issuer, subject, email, whether the email is
+  verified, and a name if the provider has one.
+- **The local provider** (issuer `local`, subject the `idn_` id) holds `local_identity` and
+  `identity_token`. It provides:
+  - sign-up
+  - checking a password
+  - changing a password, which needs the current one
+  - changing the email address, which needs the password, and unverifies the account
+  - reset and verification links
+  - Google sign-in (§12.1)
+- **Passwords:**
+  - Argon2id, at 64 MiB and three passes, in the PHC string format.
+  - At most four hashes run at once, and callers queue for a slot.
+  - The only rule is a length of at least 8.
+  - An unknown address, an account with no password and a wrong password take the same time and
+    return the same code. An inactive account returns that code too, so sign-in can't be used to
+    find out which addresses are registered.
+- **Tokens** are single-use and hashed, with a purpose (`reset`, `verify`):
+  - A reset lasts an hour, and a verification link 48 hours.
+  - A verification token's hash includes the address it was sent to, so changing the address
+    kills every outstanding link without deleting anything.
+  - The purpose is also stored and checked, so neither kind can be spent as the other.
+  - A reset link names the address it was sent to, and fails if the identity has moved since.
+  - A token is consumed only after the change it authorises has been made.
+- **`identity` depends on accounts through one interface** that it declares and `account`
+  implements:
+  - `Active(issuer, subject)`
+  - `Revoke(issuer, subject)`, which ends every session of the matching account
+
+  A password change, a reset, and Google combining with an unverified account all call
+  `Revoke`.
+
+**`account` admits an identity.**
+- **`Admit(identity, profile defaults)`:**
+  - finds the account by (issuer, subject), or creates it with its profile
+  - refuses an inactive account with the wrong-password code
+  - refreshes the profile's cached email
+  - stamps the sign-in
+  - issues a session
+- **Sessions** last 30 days and slide. Only the token's hash is stored. The expiry is set back to
+  a full 30 days once a day or more has passed since it was last set, so a session in use keeps
+  sliding, and `last_seen_at` is touched at most once a minute.
+- **`Authenticate(token)`** returns the account, and refuses an unknown, expired or inactive
+  one.
+- **`Deactivate`** ends every session. **`Reactivate`** lets the account sign in again.
+- **A crash between steps heals.** If a local sign-up creates the identity but not the account,
+  the next sign-in creates the account. Concurrent first sign-ins create one account.
+- **A new profile** takes the provider's name, or the address's local part, as its display name.
+  Its time zone (default `Europe/London`) must load in Go, and its locale (default `en-GB`) must
+  match `locale`'s check.
+
+**The codes** are the contract.
+- `identity.`:
+  - `invalid_credentials`
+  - `invalid_email`
+  - `email_taken`
+  - `google_linked` (a Google account already linked to another identity)
+  - `weak_password` (with `min`)
+  - `invalid_token`
+  - `already_verified`
+  - `no_password`
+  - `google_exchange`
+  - `google_unverified_email`
+  - `google_unconfigured` (with `missing`)
+  - `invalid_hash` (a stored hash that doesn't parse, or names parameters outside the bounds this
+    package accepts: corruption, not a wrong password, and never a panic)
+  - `hash_unavailable` (no salt could be read from the entropy source)
+  - `not_found`
+- `account.`:
+  - `unauthenticated` (a session token that is empty, unknown or expired, or whose account is
+    inactive)
+  - `identity_taken`
+  - `identity_invalid`
+  - `time_zone_invalid`
+  - `locale_invalid`
+  - `not_found`
+- An inactive account signing in gets `identity.invalid_credentials`, the same code as a wrong
+  password.
+
+The tier and quota time zone join `account` with 1.4. Deletion events and erasure follow in
+Furniture Magic's 8.5.
+
+### 12.1 Google sign-in
+
+This is Bloomprint's design, unchanged:
+- **The flow** is OAuth with PKCE, a nonce and state.
+- **The ID token** is read from the token response over TLS.
+- **The claims** are checked: issuer, audience, expiry with two minutes of skew, the nonce, and
+  `email_verified` in either its boolean or its string form.
+
+Then, in order:
+1. **A linked subject signs in,** whatever its address now is.
+2. **A local identity holding the address,** including the `gmail.com`/`googlemail.com` alias,
+   is combined:
+   - The link is written first.
+   - If the address was unverified, Google's proof outranks it: the password is removed and the
+     account's sessions are revoked.
+   - If that is interrupted after the link, the next sign-in finishes it: a linked, unverified
+     identity holding the address Google proves is stripped then. One that moved to a new,
+     unverified address keeps its password, because Google hasn't proved that address.
+   - An inactive account is refused before anything is written.
+3. **Otherwise** a verified identity with no password is created.
+
+An unverified Google address is refused.
+
+## 13. Bloomprint's move onto `plinth`
 
 Bloomprint changes only when it adopts `plinth`. It will then need these changes:
 - **Accounts:** its `User` splits into an identity and an account (§2, §6).
@@ -225,7 +344,7 @@ Bloomprint changes only when it adopts `plinth`. It will then need these changes
 - **Storage:** its single `store` package gives way to each package's own store (§3).
 - **Blob storage:** its Vercel Blob credentials move from the environment to settings.
 
-## 13. Open questions
+## 14. Open questions
 
 1. **Billing tables.** These are reviewed once the difference between what Bloomprint and
    Furniture Magic need from billing is known. Until then, `billing` is lifted as Bloomprint has

@@ -9,13 +9,15 @@ and its packages are lifted from Bloomprint with their tests. **`spec.md` is aut
 
 ## Status
 
-**Scaffold.** The module, CI and the specification exist, and so does one package:
+**Early build.** The module, CI and the specification exist, and so do these packages:
 
 | Package | Status |
 |---|---|
 | `code`: error values with a stable code and parameters | built |
+| `ids`: UUIDv7, prefixed Crockford ids, secret tokens | built |
+| `identity`: the local provider (passwords, reset and verification links, Google sign-in) | built, with its in-memory store; the Postgres store is planned (1.5) |
+| `account`: accounts, profiles and sessions | built, with its in-memory store; the Postgres store is planned (1.5) |
 | `env`, `settings`, `alert` | planned (Furniture Magic task 1.3) |
-| `identity`, `account` | planned (1.2) |
 | `flags`, `quotas`, `usage` | planned (1.4) |
 | `email`, `shadowlog`, `db`, `storetest` | planned (1.5) |
 | `dataapi` | planned (1.6) |
