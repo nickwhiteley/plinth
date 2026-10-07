@@ -16,6 +16,12 @@ const (
 	Entity Class = "entity"
 	// Reference tables are reconciled from code or configured by administrators, never deleted.
 	Reference Class = "reference"
+	// AppendOnly tables only ever gain rows (a save, an identity ever issued): logged, never
+	// deleted or rewritten by the application.
+	AppendOnly Class = "append_only"
+	// Counter tables are hot rows updated in place (a head's revision), whose history is kept
+	// elsewhere: not logged, and never deleted.
+	Counter Class = "counter"
 	// Link tables are hard-deleted; the log's D row (the old row) is the history.
 	Link Class = "link"
 	// Ephemeral tables (sessions, tokens) are hard-deleted and not logged.
@@ -43,7 +49,9 @@ type Table struct {
 func (t Table) Deletable() bool { return t.Class == Link || t.Class == Ephemeral || t.Class == Record }
 
 // Logged reports whether the table has a shadow log twin.
-func (t Table) Logged() bool { return t.Class != Ephemeral && t.Class != Internal && t.Class != Record }
+func (t Table) Logged() bool {
+	return t.Class != Ephemeral && t.Class != Internal && t.Class != Record && t.Class != Counter
+}
 
 // Roles are the product's database roles. plinth never names them.
 type Roles struct {
@@ -88,6 +96,16 @@ func Grant(ctx context.Context, tx pgx.Tx, roles Roles, tables []Table) error {
 		if err := exec("GRANT SELECT ON ALL TABLES IN SCHEMA " + logs + " TO " + id(roles.Extract)); err != nil {
 			return err
 		}
+		// The extract role moves its own cursors, and nothing else in the log schema.
+		var cursors bool
+		if err := tx.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, schema+"_log.extract_cursor").Scan(&cursors); err != nil {
+			return err
+		}
+		if cursors {
+			if err := exec("GRANT INSERT, UPDATE, DELETE ON " + logs + ".extract_cursor TO " + id(roles.Extract)); err != nil {
+				return err
+			}
+		}
 	}
 	if roles.Readonly != "" {
 		if err := exec("GRANT USAGE ON SCHEMA " + app + ", " + logs + " TO " + id(roles.Readonly)); err != nil {
@@ -116,6 +134,9 @@ func Grant(ctx context.Context, tx pgx.Tx, roles Roles, tables []Table) error {
 		}
 		if roles.App != "" {
 			privs := "SELECT, INSERT, UPDATE"
+			if t.Class == AppendOnly {
+				privs = "SELECT, INSERT" // never rewritten
+			}
 			if t.Deletable() {
 				privs += ", DELETE"
 			}

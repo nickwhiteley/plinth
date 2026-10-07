@@ -59,7 +59,7 @@ its own schedule.
 | `migrations` | (new) | `plinth`'s migration stream and table manifest (§4) | 1.5 |
 | `code` | (new) | Error values: a stable code and string parameters (§9) | 1.1 |
 | `pgtest`, `fixture` | `internal/store/storetest` | Per-schema test databases, and the rows a conformance suite needs from other packages (§11) | 1.5 |
-| `dataapi` | the `data-api` repository | The extraction routes over the `(txid, log_id)` cursor | 1.6 |
+| `dataapi` | the `data-api` repository, rebuilt | Extraction of the shadow logs by `(txid, log_id)` cursor, as the extract role, and its HTTP handler (§14) | 1.6 |
 | `rbac` | Bloomprint's admin role, generalised | System permissions declared in code and reconciled at boot, roles as data, role grants to accounts, and the last-holder guard | Furniture Magic 8.1 |
 | `blob` | `internal/blob` | An object store behind one interface (get, put, conditional put, delete, list), with a local directory for development and Vercel Blob, plus the `blob_object` metadata table. S3 and others are further implementations. | Furniture Magic 6.3 |
 
@@ -152,6 +152,9 @@ refused, because a down that drops a log table destroys audit history.
 - **its class:**
   - `entity`: soft-deleted
   - `reference`: reconciled or configured, never deleted
+  - `append_only`: only ever gains rows (a save, an id ever issued), logged, never deleted
+  - `counter`: a hot row updated in place whose history is kept elsewhere (a head's revision),
+    not logged and never deleted
   - `link`: hard-deleted, and logged
   - `ephemeral`: hard-deleted, and not logged
   - `record`: a record with its own retention (the communication log), hard-deleted when it
@@ -163,8 +166,9 @@ refused, because a down that drops a log table destroys audit history.
 
 **`db.Grant(roles, tables)`** applies the manifest, `plinth`'s and the product's together, as the
 owner on every deploy:
-- The runtime role gets `SELECT, INSERT, UPDATE` on every non-internal table, `DELETE` only on
-  link and ephemeral ones, and `SELECT` on the log.
+- The runtime role gets `SELECT, INSERT, UPDATE` on every non-internal table (only `SELECT,
+  INSERT` on an append-only one), `DELETE` only on link, ephemeral and record ones, and `SELECT`
+  on the log.
 - The extract role gets the log only.
 - The read-only role gets a column allowlist without secrets, and the log.
 
@@ -498,7 +502,35 @@ overrides, and quotas per tier.
 - **Reservation** (Furniture Magic's assistant turns: an advisory lock, then a sum including
   running turns' reservations) is the product's transaction, built on these.
 
-## 14. Bloomprint's move onto `plinth`
+## 14. The data API
+
+The warehouse reads the shadow logs through `dataapi`, connected as the extract role, which can
+see the log schema and nothing else. It's folded in from the standalone `data-api` and rebuilt on
+Furniture Magic data-model §10.3.
+- **The cursor is `(txid, log_id)`,** read only below `pg_snapshot_xmin(pg_current_snapshot())`.
+  A long transaction that commits after a shorter one is never skipped: nothing at or above an
+  open transaction's txid is returned until it commits. A time window or a sequence can't promise
+  that. A test opens a long transaction to prove it.
+- **`Tables`** lists the logs the extract role may read, with their table comments and stored
+  cursors. A table whose log is withheld (`NoExtract`) is invisible.
+- **`Window`** returns up to 10,000 rows past a cursor, each as Postgres's `row_to_json` (so
+  numbers, uuids and times keep their types), with the next cursor.
+- **`Ack` and `Reset`:** the consumer acknowledges a cursor once it has kept the page, so a crash
+  re-reads rather than loses. Acknowledging is forward-only, and `Reset` forgets.
+  - Cursors live in `<app>_log.extract_cursor`, which only the extract role writes.
+  - Retention reads them, so a row not yet extracted is never dropped.
+- **The extractor is given the app schema's name,** as configuration. The extract role can't use
+  the app schema, so it can't find it from the connection.
+- **`Handler`** serves `GET /extract`, `GET /extract/{table}`, `POST /extract/{table}/ack` and
+  `POST /extract/{table}/reset`. The product mounts it behind its own authentication. Errors are
+  JSON codes.
+- **Not yet:**
+  - **The current-state snapshot** reads the product's `<app>_extract` views (Furniture Magic
+    task 8.4), and arrives with them.
+  - **An execution history** of extractions is a follow-up.
+  - **The standalone `data-api`** serves another product's schema and is left as it is.
+
+## 15. Bloomprint's move onto `plinth`
 
 Bloomprint changes only when it adopts `plinth`. It will then need these changes:
 - **Accounts:** its `User` splits into an identity and an account (§2, §6).
@@ -507,7 +539,7 @@ Bloomprint changes only when it adopts `plinth`. It will then need these changes
 - **Storage:** its single `store` package gives way to each package's own store (§3).
 - **Blob storage:** its Vercel Blob credentials move from the environment to settings.
 
-## 15. Open questions
+## 16. Open questions
 
 1. **Billing tables.** These are reviewed once the difference between what Bloomprint and
    Furniture Magic need from billing is known. Until then, `billing` is lifted as Bloomprint has
