@@ -19,6 +19,8 @@ import (
 
 const pw = "a sufficiently long password"
 
+var defaultTier = ids.New()
+
 type rig struct {
 	local    *identity.Local
 	accounts *account.Service
@@ -28,7 +30,7 @@ type rig struct {
 func newRig(t *testing.T, opts ...account.Option) rig {
 	t.Helper()
 	st := accmem.New()
-	svc := account.New(st, opts...)
+	svc := account.New(st, append([]account.Option{account.WithDefaultTier(defaultTier)}, opts...)...)
 	return rig{local: identity.NewLocal(idnmem.New(), svc, identity.WithReducedHashCost()), accounts: svc, store: st}
 }
 
@@ -387,5 +389,29 @@ func TestGoogleCannotSignInToADeactivatedAccount(t *testing.T) {
 	}
 	if _, err := r.accounts.Admit(ctx, id, account.NewProfile{}); !errors.Is(err, identity.ErrInvalidCredentials) {
 		t.Errorf("Admit on a deactivated account = %v", err)
+	}
+}
+
+func TestANewAccountStartsOnTheDefaultTierWithItsProfilesZone(t *testing.T) {
+	ctx := context.Background()
+	r := newRig(t)
+	ad, err := r.accounts.Admit(ctx, identity.Identity{Issuer: "local", Subject: "idn_x", Email: "x@example.com"}, account.NewProfile{TimeZone: "Asia/Tokyo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ad.Account.TierID != defaultTier || ad.Account.EffectiveTier() != defaultTier || ad.Account.QuotaTimeZone != "Asia/Tokyo" {
+		t.Errorf("a new account: %+v", ad.Account)
+	}
+	// Support moves the quota day; the zone must be real.
+	if err := r.accounts.SetQuotaTimeZone(ctx, ad.Account.ID, "Mars/Olympus"); !errors.Is(err, account.ErrTimeZoneInvalid) {
+		t.Errorf("an unknown zone = %v", err)
+	}
+	if err := r.accounts.SetQuotaTimeZone(ctx, ad.Account.ID, "Europe/Paris"); err != nil {
+		t.Fatal(err)
+	}
+	// A service with no default tier can't create accounts.
+	bare := account.New(accmem.New())
+	if _, err := bare.Admit(ctx, identity.Identity{Issuer: "local", Subject: "idn_y", Email: "y@example.com"}, account.NewProfile{}); !errors.Is(err, account.ErrNoDefaultTier) {
+		t.Errorf("Admit with no default tier = %v", err)
 	}
 }

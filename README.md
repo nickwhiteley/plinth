@@ -21,7 +21,9 @@ and its packages are lifted from Bloomprint with their tests. **`spec.md` is aut
 | `settings`: declared, encrypted settings, the live snapshot and its write path | built, with its in-memory store; the Postgres store and the admin handler are planned (1.5, `rbac`) |
 | `alert`: errors from the log, rationed, redacted and mailed | built; the mail sink is planned (1.5) |
 | `actor`: who is acting, for attribution | built |
-| `flags`, `quotas`, `usage` | planned (1.4) |
+| `flags`: tiers and feature flags | built, with its in-memory store; the Postgres store is planned (1.5) |
+| `quotas`: limits by tier, with overrides | built, with its in-memory store; the Postgres store is planned (1.5) |
+| `usage`: the quota day and the check | built |
 | `email`, `shadowlog`, `db`, `storetest` | planned (1.5) |
 | `dataapi` | planned (1.6) |
 | `billing` | planned (Furniture Magic 8.3) |

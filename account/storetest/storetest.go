@@ -27,7 +27,7 @@ func now() time.Time { return time.Now().UTC().Truncate(time.Microsecond) }
 
 func mustAccount(t *testing.T, s account.Store, subject string) account.Account {
 	t.Helper()
-	a := account.Account{ID: ids.New(), IdentityIssuer: "local", IdentitySubject: subject, Active: true, CreatedAt: now()}
+	a := account.Account{ID: ids.New(), IdentityIssuer: "local", IdentitySubject: subject, TierID: ids.New(), QuotaTimeZone: "Europe/London", Active: true, CreatedAt: now()}
 	p := account.Profile{AccountID: a.ID, DisplayName: subject, TimeZone: "Europe/London", Locale: "en-GB", Email: subject + "@example.com", RefreshedAt: now()}
 	if err := s.CreateAccount(context.Background(), a, p); err != nil {
 		t.Fatalf("CreateAccount(%s): %v", subject, err)
@@ -45,6 +45,36 @@ func testAccounts(t *testing.T, s account.Store) {
 	if got.LastSignedInAt != nil || got.DeactivatedAt != nil {
 		t.Errorf("a new account has times it shouldn't: %+v", got)
 	}
+	if got.TierID != a.TierID || got.TierOverrideID != nil || got.QuotaTimeZone != "Europe/London" || got.EffectiveTier() != a.TierID {
+		t.Errorf("tier and quota zone: %+v", got)
+	}
+
+	// The tier and its override, set and cleared.
+	pro, trial := ids.New(), ids.New()
+	if err := s.SetTier(ctx, a.ID, pro, &trial); err != nil {
+		t.Fatal(err)
+	}
+	if moved, _ := s.AccountByID(ctx, a.ID); moved.TierID != pro || moved.TierOverrideID == nil || *moved.TierOverrideID != trial || moved.EffectiveTier() != trial {
+		t.Errorf("SetTier with an override: %+v", moved)
+	}
+	if err := s.SetTier(ctx, a.ID, pro, nil); err != nil {
+		t.Fatal(err)
+	}
+	if moved, _ := s.AccountByID(ctx, a.ID); moved.TierOverrideID != nil || moved.EffectiveTier() != pro {
+		t.Errorf("clearing the override: %+v", moved)
+	}
+	if err := s.SetQuotaTimeZone(ctx, a.ID, "America/New_York"); err != nil {
+		t.Fatal(err)
+	}
+	if moved, _ := s.AccountByID(ctx, a.ID); moved.QuotaTimeZone != "America/New_York" {
+		t.Errorf("SetQuotaTimeZone: %q", moved.QuotaTimeZone)
+	}
+	if err := s.SetTier(ctx, ids.New(), pro, nil); !errors.Is(err, account.ErrNotFound) {
+		t.Errorf("SetTier(unknown) = %v", err)
+	}
+	if err := s.SetQuotaTimeZone(ctx, ids.New(), "UTC"); !errors.Is(err, account.ErrNotFound) {
+		t.Errorf("SetQuotaTimeZone(unknown) = %v", err)
+	}
 	if byID, err := s.AccountByID(ctx, a.ID); err != nil || byID.IdentitySubject != "idn_one" {
 		t.Errorf("AccountByID = %+v, %v", byID, err)
 	}
@@ -59,7 +89,7 @@ func testAccounts(t *testing.T, s account.Store) {
 		t.Errorf("AccountByID(unknown) = %v", err)
 	}
 	// One live account per identity.
-	dup := account.Account{ID: ids.New(), IdentityIssuer: "local", IdentitySubject: "idn_one", Active: true, CreatedAt: now()}
+	dup := account.Account{ID: ids.New(), IdentityIssuer: "local", IdentitySubject: "idn_one", TierID: a.TierID, QuotaTimeZone: "UTC", Active: true, CreatedAt: now()}
 	if err := s.CreateAccount(ctx, dup, account.Profile{DisplayName: "x", TimeZone: "UTC", Locale: "en-GB", Email: "x@example.com", RefreshedAt: now()}); !errors.Is(err, account.ErrIdentityTaken) {
 		t.Errorf("a second account for one identity = %v", err)
 	}
