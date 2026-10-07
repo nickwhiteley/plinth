@@ -21,8 +21,8 @@ import (
 // SessionTTL is how long a session lasts. It slides: use extends it.
 const SessionTTL = 30 * 24 * time.Hour
 
-// touchThreshold avoids rewriting the expiry on every request: it's extended only once the
-// session is within a day of the end of its TTL.
+// touchThreshold avoids rewriting the expiry on every request: it's set back to a full TTL once a
+// day or more has passed since it was last set, so a session in use keeps sliding.
 const touchThreshold = SessionTTL - 24*time.Hour
 
 // seenInterval is how often last_seen_at is rewritten at most.
