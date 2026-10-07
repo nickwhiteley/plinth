@@ -88,6 +88,16 @@ func Grant(ctx context.Context, tx pgx.Tx, roles Roles, tables []Table) error {
 		if err := exec("GRANT SELECT ON ALL TABLES IN SCHEMA " + logs + " TO " + id(roles.Extract)); err != nil {
 			return err
 		}
+		// The extract role moves its own cursors, and nothing else in the log schema.
+		var cursors bool
+		if err := tx.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, schema+"_log.extract_cursor").Scan(&cursors); err != nil {
+			return err
+		}
+		if cursors {
+			if err := exec("GRANT INSERT, UPDATE, DELETE ON " + logs + ".extract_cursor TO " + id(roles.Extract)); err != nil {
+				return err
+			}
+		}
 	}
 	if roles.Readonly != "" {
 		if err := exec("GRANT USAGE ON SCHEMA " + app + ", " + logs + " TO " + id(roles.Readonly)); err != nil {

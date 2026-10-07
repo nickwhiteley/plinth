@@ -12,53 +12,12 @@ import (
 	"github.com/nickwhiteley/plinth/shadowlog"
 )
 
-// Test roles are cluster-wide, so they're created once, idempotently, under a lock.
-var roles = db.Roles{App: "plinth_t_app", Extract: "plinth_t_extract", Readonly: "plinth_t_readonly"}
+var roles = pgtest.Roles
 
-func ensureRoles(t *testing.T, c *pgx.Conn) {
-	t.Helper()
-	if _, err := c.Exec(ctx, `SELECT pg_advisory_lock(42)`); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _, _ = c.Exec(ctx, `SELECT pg_advisory_unlock(42)`) }()
-	for _, q := range []string{
-		`DO $$ BEGIN
-		   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'plinth_t_owner') THEN CREATE ROLE plinth_t_owner NOLOGIN; END IF;
-		   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'plinth_t_app') THEN CREATE ROLE plinth_t_app LOGIN PASSWORD 'plinth_t' NOINHERIT; END IF;
-		   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'plinth_t_extract') THEN CREATE ROLE plinth_t_extract LOGIN PASSWORD 'plinth_t' NOINHERIT; END IF;
-		   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'plinth_t_readonly') THEN CREATE ROLE plinth_t_readonly LOGIN PASSWORD 'plinth_t' NOINHERIT; END IF;
-		   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'plinth_t_migrate') THEN
-		     CREATE ROLE plinth_t_migrate LOGIN PASSWORD 'plinth_t';
-		     GRANT plinth_t_owner TO plinth_t_migrate WITH INHERIT FALSE, SET TRUE;
-		   END IF;
-		 END $$`,
-		`ALTER ROLE plinth_t_app LOGIN PASSWORD 'plinth_t'`,
-		`ALTER ROLE plinth_t_extract LOGIN PASSWORD 'plinth_t'`,
-		`ALTER ROLE plinth_t_readonly LOGIN PASSWORD 'plinth_t'`,
-		`ALTER ROLE plinth_t_migrate LOGIN PASSWORD 'plinth_t'`,
-	} {
-		if _, err := c.Exec(ctx, q); err != nil {
-			t.Fatal(err)
-		}
-	}
-}
-
-// as runs fn logged in as role (not SET ROLE from a superuser session, which is checked against the
-// session user), with the test schema on its search_path.
+// as runs fn logged in as role.
 func as(t *testing.T, d *pgtest.DB, role string, fn func(c *pgx.Conn)) {
 	t.Helper()
-	cfg, err := pgx.ParseConfig(d.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg.User, cfg.Password = role, "plinth_t"
-	cfg.RuntimeParams["search_path"] = d.Schema
-	c, err := pgx.ConnectConfig(ctx, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.Close(ctx)
-	fn(c)
+	fn(pgtest.ConnectAs(t, d, role))
 }
 
 func denied(t *testing.T, c *pgx.Conn, what, q string, args ...any) {
@@ -99,17 +58,7 @@ func TestRoleSeparation(t *testing.T) {
 	fx := pgtest.Fixtures{DB: d}
 	acct := fx.Account(t)
 	setup := conn(t, d)
-	ensureRoles(t, setup)
-	tx, err := setup.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Grant(ctx, tx, roles, migrations.Tables); err != nil {
-		t.Fatal(err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		t.Fatal(err)
-	}
+	pgtest.EnsureRoles(t, d, migrations.Tables)
 	logs := pgx.Identifier{d.Schema + "_log"}.Sanitize()
 
 	as(t, d, roles.App, func(c *pgx.Conn) {

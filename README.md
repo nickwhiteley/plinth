@@ -29,7 +29,7 @@ and its packages are lifted from Bloomprint with their tests. **`spec.md` is aut
 | `shadowlog`: the boot checks | built |
 | `pgtest`, `fixture`: Postgres test schemas and fixtures | built |
 | `email`: kinds, Postmark, the communication log, and rendering in the recipient's locale | built, with in-memory and Postgres stores |
-| `dataapi` | planned (1.6) |
+| `dataapi`: extraction of the shadow logs by `(txid, log_id)` cursor, and its handler | built |
 | `billing` | planned (Furniture Magic 8.3) |
 | `rbac`: system roles and permissions | planned (Furniture Magic 8.1) |
 | `blob`: object storage (Vercel Blob, S3 or another) | planned (Furniture Magic 6.3) |
