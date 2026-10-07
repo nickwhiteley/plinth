@@ -168,6 +168,10 @@ refused, because a down that drops a log table destroys audit history.
 
 **`db.Grant(roles, tables)`** applies the manifest, `plinth`'s and the product's together, as the
 owner on every deploy:
+- The runtime role gets `EXECUTE` on the functions `plinth`'s constraints call
+  (`db.ConstraintFunctions`, today `valid_time_zone`). A product's setup revokes `EXECUTE` from
+  `PUBLIC`, and a `CHECK` runs with the writer's privileges. `pgtest` revokes it the same way, so
+  the role tests see what a deployment sees.
 - The runtime role gets `SELECT, INSERT, UPDATE` on every non-internal table (only `SELECT,
   INSERT` on an append-only or journal one), `DELETE` only on link, ephemeral and record ones, and `SELECT`
   on the log.
