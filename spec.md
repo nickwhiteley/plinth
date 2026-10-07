@@ -393,7 +393,9 @@ unchanged, and so do its tests.
   - `google_exchange`
   - `google_unverified_email`
   - `google_unconfigured` (with `missing`)
-  - `invalid_hash` (a stored hash that doesn't parse: corruption, not a wrong password)
+  - `invalid_hash` (a stored hash that doesn't parse, or names parameters outside the bounds this
+    package accepts: corruption, not a wrong password, and never a panic)
+  - `hash_unavailable` (no salt could be read from the entropy source)
   - `not_found`
 - `account.`:
   - `unauthenticated` (a session token that is empty, unknown or expired, or whose account is

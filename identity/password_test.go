@@ -141,3 +141,54 @@ func TestDefaultHashCostIsTheProductionFactor(t *testing.T) {
 // stubStore and stubAccounts satisfy NewLocal for tests that never reach them.
 type stubStore struct{ Store }
 type stubAccounts struct{ Accounts }
+
+// A corrupt stored hash is ErrInvalidHash, never a panic, and never a hash that verifies anything.
+// argon2.IDKey panics on t < 1, p < 1, m < 8p and a zero key length, and tries to allocate whatever
+// m says, so every parameter is checked before it is used (plinth#2 review).
+func TestVerifyRefusesCorruptParameters(t *testing.T) {
+	const salt, key = "c2FsdHNhbHRzYWx0c2FsdA", "a2V5a2V5a2V5a2V5a2V5a2V5a2V5a2V5a2V5a2V5a2U"
+	for name, h := range map[string]string{
+		"no passes":        "$argon2id$v=19$m=65536,t=0,p=1$" + salt + "$" + key,
+		"no threads":       "$argon2id$v=19$m=65536,t=3,p=0$" + salt + "$" + key,
+		"too little mem":   "$argon2id$v=19$m=7,t=3,p=1$" + salt + "$" + key,
+		"mem below 8p":     "$argon2id$v=19$m=16,t=3,p=4$" + salt + "$" + key,
+		"absurd memory":    "$argon2id$v=19$m=4294967295,t=3,p=1$" + salt + "$" + key,
+		"absurd passes":    "$argon2id$v=19$m=65536,t=4294967295,p=1$" + salt + "$" + key,
+		"an empty key":     "$argon2id$v=19$m=65536,t=3,p=1$" + salt + "$",
+		"an empty salt":    "$argon2id$v=19$m=65536,t=3,p=1$$" + key,
+		"a short key":      "$argon2id$v=19$m=65536,t=3,p=1$" + salt + "$a2V5",
+		"a short salt":     "$argon2id$v=19$m=65536,t=3,p=1$c2FsdA$" + key,
+		"trailing params":  "$argon2id$v=19$m=65536,t=3,p=1,x=2$" + salt + "$" + key,
+		"a padded version": "$argon2id$v=19x$m=65536,t=3,p=1$" + salt + "$" + key,
+	} {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("%s: panicked: %v", name, r)
+				}
+			}()
+			ok, err := VerifyPassword("whatever", h)
+			if ok || !errors.Is(err, ErrInvalidHash) {
+				t.Errorf("%s: VerifyPassword = %v, %v; want false, ErrInvalidHash", name, ok, err)
+			}
+		}()
+	}
+	if live := hashes.live.Load(); live != 0 {
+		t.Errorf("%d gate slots held after refusing corrupt hashes", live)
+	}
+}
+
+// Every error the hashing path returns is a code, including the one crypto/rand practically never
+// produces (plinth#2 review).
+func TestASaltFailureIsACode(t *testing.T) {
+	defer func(r func([]byte) (int, error)) { randRead = r }(randRead)
+	randRead = func([]byte) (int, error) { return 0, errors.New("the entropy source is gone") }
+	_, err := HashPassword("a sufficiently long password")
+	var ce *code.Error
+	if !errors.As(err, &ce) || !errors.Is(err, ErrHashUnavailable) {
+		t.Fatalf("a salt failure = %v, want ErrHashUnavailable", err)
+	}
+	if live := hashes.live.Load(); live != 0 {
+		t.Errorf("a failed hash held a gate slot")
+	}
+}
