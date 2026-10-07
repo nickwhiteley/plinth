@@ -1,0 +1,7 @@
+# Editor swap files
+*.swp
+*.swo
+*~
+
+# Local configuration
+.env
