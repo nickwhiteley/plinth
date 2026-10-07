@@ -19,7 +19,7 @@ and its packages are lifted from Bloomprint with their tests. **`spec.md` is aut
 | `account`: accounts, profiles and sessions | built, with in-memory and Postgres stores |
 | `env`: the `.env` loader, for declared names only | built |
 | `settings`: declared, encrypted settings, the live snapshot and its write path | built, with in-memory and Postgres stores; the admin handler is planned (`rbac`) |
-| `alert`: errors from the log, rationed, redacted and mailed | built; the mail sink is planned (1.5b) |
+| `alert`: errors from the log, rationed, redacted and mailed | built |
 | `actor`: who is acting, for attribution | built |
 | `flags`: tiers and feature flags | built, with in-memory and Postgres stores |
 | `quotas`: limits by tier, with overrides | built, with in-memory and Postgres stores |
@@ -28,7 +28,7 @@ and its packages are lifted from Bloomprint with their tests. **`spec.md` is aut
 | `migrations`: plinth's schema, with the shadow log | built |
 | `shadowlog`: the boot checks | built |
 | `pgtest`, `fixture`: Postgres test schemas and fixtures | built |
-| `email` | planned (1.5b) |
+| `email`: kinds, Postmark, the communication log, and rendering in the recipient's locale | built, with in-memory and Postgres stores |
 | `dataapi` | planned (1.6) |
 | `billing` | planned (Furniture Magic 8.3) |
 | `rbac`: system roles and permissions | planned (Furniture Magic 8.1) |

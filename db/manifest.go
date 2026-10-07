@@ -20,6 +20,10 @@ const (
 	Link Class = "link"
 	// Ephemeral tables (sessions, tokens) are hard-deleted and not logged.
 	Ephemeral Class = "ephemeral"
+	// Record tables (the communication log) keep their own history with their own retention:
+	// hard-deleted when they expire, and not shadow-logged, because the log would copy the
+	// personal data they hold and erasure would have to scrub it twice.
+	Record Class = "record"
 	// Internal tables (a migration version table) are no role's business but the owner's.
 	Internal Class = "internal"
 )
@@ -36,10 +40,10 @@ type Table struct {
 }
 
 // Deletable reports whether the runtime role may delete from the table.
-func (t Table) Deletable() bool { return t.Class == Link || t.Class == Ephemeral }
+func (t Table) Deletable() bool { return t.Class == Link || t.Class == Ephemeral || t.Class == Record }
 
 // Logged reports whether the table has a shadow log twin.
-func (t Table) Logged() bool { return t.Class != Ephemeral && t.Class != Internal }
+func (t Table) Logged() bool { return t.Class != Ephemeral && t.Class != Internal && t.Class != Record }
 
 // Roles are the product's database roles. plinth never names them.
 type Roles struct {

@@ -1,0 +1,8 @@
+{
+  "email.password_reset.subject": "Reset your password",
+  "email.password_reset.body": "Someone asked to reset the password for {email}. If it was you, open this link within the hour to choose a new one:\n\n{link}\n\nIf it wasn't you, you can ignore this email. Your password hasn't changed.",
+  "email.verify_address.subject": "Confirm your email address",
+  "email.verify_address.body": "Please confirm that {email} is your address by opening this link within 48 hours:\n\n{link}",
+  "email.address_changed.subject": "Your email address was changed",
+  "email.address_changed.body": "The email address for your account was changed from {old_email} to {new_email}.\n\nIf you didn't make this change, reply to this email straight away and we'll help you get your account back."
+}
