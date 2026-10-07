@@ -110,3 +110,26 @@ func TestRoleSeparation(t *testing.T) {
 		t.Errorf("a superuser: %+v, %v", r, err)
 	}
 }
+
+// A journal is its own history: the runtime role appends to it and reads it, never rewrites or
+// deletes it, and it has no log twin.
+func TestJournalClass(t *testing.T) {
+	d := pgtest.New(t)
+	if _, err := d.Pool.Exec(ctx, `CREATE TABLE journal_t (id int CONSTRAINT journal_t_pk PRIMARY KEY, note text)`); err != nil {
+		t.Fatal(err)
+	}
+	tables := append(append([]db.Table{}, migrations.Tables...), db.Table{Name: "journal_t", Class: db.Journal})
+	if problems, err := db.CheckManifest(ctx, d.Pool, tables); err != nil || len(problems) != 0 {
+		t.Errorf("a journal without a log twin: %v, %v", problems, err)
+	}
+	pgtest.EnsureRoles(t, d, tables)
+	as(t, d, roles.App, func(c *pgx.Conn) {
+		allowed(t, c, "the app appends to a journal", `INSERT INTO journal_t VALUES (1, 'a')`)
+		allowed(t, c, "the app reads a journal", `SELECT count(*) FROM journal_t`)
+		denied(t, c, "the app rewrites a journal", `UPDATE journal_t SET note = 'b'`)
+		denied(t, c, "the app deletes from a journal", `DELETE FROM journal_t`)
+	})
+	as(t, d, roles.Readonly, func(c *pgx.Conn) {
+		allowed(t, c, "readonly reads a journal", `SELECT note FROM journal_t`)
+	})
+}
