@@ -313,7 +313,7 @@ func TestAuthenticateSlidesTheExpiryAndStampsLastSeen(t *testing.T) {
 	if s, _ := r.store.Session(ctx, hash); !s.LastSeenAt.Equal(issued.LastSeenAt) || !s.ExpiresAt.Equal(issued.ExpiresAt) {
 		t.Errorf("a request within the minute wrote the session: %+v", s)
 	}
-	// After a minute: last seen moves, and the expiry doesn't (it isn't near its end).
+	// After a minute: last seen moves, and the expiry doesn't (it was set less than a day ago).
 	clock = clock.Add(time.Minute)
 	if _, err := r.accounts.Authenticate(ctx, ad.Token); err != nil {
 		t.Fatal(err)
@@ -321,7 +321,7 @@ func TestAuthenticateSlidesTheExpiryAndStampsLastSeen(t *testing.T) {
 	if s, _ := r.store.Session(ctx, hash); !s.LastSeenAt.Equal(clock) || !s.ExpiresAt.Equal(issued.ExpiresAt) {
 		t.Errorf("after a minute: %+v", s)
 	}
-	// Near the end of its TTL: the expiry slides a full TTL from now.
+	// A day or more since the expiry was last set: it slides to a full TTL from now.
 	clock = clock.Add(2 * 24 * time.Hour)
 	if _, err := r.accounts.Authenticate(ctx, ad.Token); err != nil {
 		t.Fatal(err)
