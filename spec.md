@@ -370,6 +370,7 @@ unchanged, and so do its tests.
   - A verification token's hash includes the address it was sent to, so changing the address
     kills every outstanding link without deleting anything.
   - The purpose is also stored and checked, so neither kind can be spent as the other.
+  - A reset link names the address it was sent to, and fails if the identity has moved since.
   - A token is consumed only after the change it authorises has been made.
 - **`identity` depends on accounts through one interface** that it declares and `account`
   implements:
@@ -386,9 +387,9 @@ unchanged, and so do its tests.
   - refreshes the profile's cached email
   - stamps the sign-in
   - issues a session
-- **Sessions** last 30 days and slide. Only the token's hash is stored. Expiry is extended once
-  a session is within a day of the end of its TTL, and `last_seen_at` is touched at most once a
-  minute.
+- **Sessions** last 30 days and slide. Only the token's hash is stored. The expiry is set back to
+  a full 30 days once a day or more has passed since it was last set, so a session in use keeps
+  sliding, and `last_seen_at` is touched at most once a minute.
 - **`Authenticate(token)`** returns the account, and refuses an unknown, expired or inactive
   one.
 - **`Deactivate`** ends every session. **`Reactivate`** lets the account sign in again.
@@ -450,6 +451,9 @@ Then, in order:
    - The link is written first.
    - If the address was unverified, Google's proof outranks it: the password is removed and the
      account's sessions are revoked.
+   - If that is interrupted after the link, the next sign-in finishes it: a linked, unverified
+     identity holding the address Google proves is stripped then. One that moved to a new,
+     unverified address keeps its password, because Google hasn't proved that address.
    - An inactive account is refused before anything is written.
 3. **Otherwise** a verified identity with no password is created.
 
