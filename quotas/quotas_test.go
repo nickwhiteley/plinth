@@ -23,9 +23,9 @@ func describe(p *int64) int64 {
 }
 
 var (
-	ta    = flags.Tier{ID: ids.New(), Key: "a", Order: 1, Enabled: true}
-	tb    = flags.Tier{ID: ids.New(), Key: "b", Order: 2, Enabled: true}
-	tc    = flags.Tier{ID: ids.New(), Key: "c", Order: 3, Enabled: true}
+	ta    = flags.Tier{ID: ids.New(), Key: "ta", Name: "A", Order: 1, Enabled: true}
+	tb    = flags.Tier{ID: ids.New(), Key: "tb", Name: "B", Order: 2, Enabled: true}
+	tc    = flags.Tier{ID: ids.New(), Key: "tc", Name: "C", Order: 3, Enabled: true}
 	three = []flags.Tier{tc, ta, tb} // deliberately out of order
 )
 

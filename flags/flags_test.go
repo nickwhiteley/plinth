@@ -11,9 +11,9 @@ import (
 
 // A three-step ladder: free < plus < pro.
 var (
-	free  = flags.Tier{ID: ids.New(), Key: "free", Order: 10, Enabled: true}
-	plus  = flags.Tier{ID: ids.New(), Key: "plus", Order: 20, Enabled: true}
-	pro   = flags.Tier{ID: ids.New(), Key: "pro", Order: 30, Enabled: true}
+	free  = flags.Tier{ID: ids.New(), Key: "free", Name: "Free", Order: 10, Enabled: true}
+	plus  = flags.Tier{ID: ids.New(), Key: "plus", Name: "Plus", Order: 20, Enabled: true}
+	pro   = flags.Tier{ID: ids.New(), Key: "pro", Name: "Pro", Order: 30, Enabled: true}
 	tiers = []flags.Tier{free, plus, pro}
 )
 

@@ -9,25 +9,27 @@ import (
 	"time"
 
 	"github.com/nickwhiteley/plinth/account"
+	"github.com/nickwhiteley/plinth/fixture"
 	"github.com/nickwhiteley/plinth/ids"
 )
 
-// Run runs the suite. factory returns an empty store for each case.
-func Run(t *testing.T, factory func(t *testing.T) account.Store) {
-	for name, f := range map[string]func(*testing.T, account.Store){
+// Run runs the suite. factory returns an empty store for each case, and the fixtures its rows
+// may reference.
+func Run(t *testing.T, factory func(t *testing.T) (account.Store, fixture.Source)) {
+	for name, f := range map[string]func(*testing.T, account.Store, fixture.Source){
 		"accounts": testAccounts,
 		"profiles": testProfiles,
 		"sessions": testSessions,
 	} {
-		t.Run(name, func(t *testing.T) { f(t, factory(t)) })
+		t.Run(name, func(t *testing.T) { s, fx := factory(t); f(t, s, fx) })
 	}
 }
 
 func now() time.Time { return time.Now().UTC().Truncate(time.Microsecond) }
 
-func mustAccount(t *testing.T, s account.Store, subject string) account.Account {
+func mustAccount(t *testing.T, s account.Store, fx fixture.Source, subject string) account.Account {
 	t.Helper()
-	a := account.Account{ID: ids.New(), IdentityIssuer: "local", IdentitySubject: subject, TierID: ids.New(), QuotaTimeZone: "Europe/London", Active: true, CreatedAt: now()}
+	a := account.Account{ID: ids.New(), IdentityIssuer: "local", IdentitySubject: subject, TierID: fx.Tier(t), QuotaTimeZone: "Europe/London", Active: true, CreatedAt: now()}
 	p := account.Profile{AccountID: a.ID, DisplayName: subject, TimeZone: "Europe/London", Locale: "en-GB", Email: subject + "@example.com", RefreshedAt: now()}
 	if err := s.CreateAccount(context.Background(), a, p); err != nil {
 		t.Fatalf("CreateAccount(%s): %v", subject, err)
@@ -35,9 +37,9 @@ func mustAccount(t *testing.T, s account.Store, subject string) account.Account 
 	return a
 }
 
-func testAccounts(t *testing.T, s account.Store) {
+func testAccounts(t *testing.T, s account.Store, fx fixture.Source) {
 	ctx := context.Background()
-	a := mustAccount(t, s, "idn_one")
+	a := mustAccount(t, s, fx, "idn_one")
 	got, err := s.AccountByIdentity(ctx, "local", "idn_one")
 	if err != nil || got.ID != a.ID || !got.Active || !got.CreatedAt.Equal(a.CreatedAt) {
 		t.Fatalf("AccountByIdentity = %+v, %v", got, err)
@@ -50,7 +52,7 @@ func testAccounts(t *testing.T, s account.Store) {
 	}
 
 	// The tier and its override, set and cleared.
-	pro, trial := ids.New(), ids.New()
+	pro, trial := fx.Tier(t), fx.Tier(t)
 	if err := s.SetTier(ctx, a.ID, pro, &trial); err != nil {
 		t.Fatal(err)
 	}
@@ -124,9 +126,9 @@ func testAccounts(t *testing.T, s account.Store) {
 	}
 }
 
-func testProfiles(t *testing.T, s account.Store) {
+func testProfiles(t *testing.T, s account.Store, fx fixture.Source) {
 	ctx := context.Background()
-	a := mustAccount(t, s, "idn_one")
+	a := mustAccount(t, s, fx, "idn_one")
 	p, err := s.Profile(ctx, a.ID)
 	if err != nil || p.AccountID != a.ID || p.DisplayName != "idn_one" || p.TimeZone != "Europe/London" || p.Locale != "en-GB" || p.Email != "idn_one@example.com" {
 		t.Fatalf("Profile = %+v, %v", p, err)
@@ -146,9 +148,9 @@ func testProfiles(t *testing.T, s account.Store) {
 	}
 }
 
-func testSessions(t *testing.T, s account.Store) {
+func testSessions(t *testing.T, s account.Store, fx fixture.Source) {
 	ctx := context.Background()
-	one := mustAccount(t, s, "idn_one")
+	one := mustAccount(t, s, fx, "idn_one")
 	future := now().Add(time.Hour)
 	live := account.Session{TokenHash: ids.HashToken("live"), AccountID: one.ID, CreatedAt: now(), LastSeenAt: now(), ExpiresAt: future}
 	if err := s.CreateSession(ctx, live); err != nil {
@@ -190,7 +192,7 @@ func testSessions(t *testing.T, s account.Store) {
 
 	// Revoking one account's sessions takes all of them and none of anyone else's. The second half
 	// is the one worth testing: sweeping the whole table passes the first half perfectly.
-	two := mustAccount(t, s, "idn_two")
+	two := mustAccount(t, s, fx, "idn_two")
 	for _, tok := range []string{"mine-1", "mine-2"} {
 		if err := s.CreateSession(ctx, account.Session{TokenHash: ids.HashToken(tok), AccountID: one.ID, CreatedAt: now(), LastSeenAt: now(), ExpiresAt: future}); err != nil {
 			t.Fatal(err)

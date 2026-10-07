@@ -12,13 +12,17 @@ var (
 	ErrNotFound = code.New("flags.not_found")
 	// ErrTierExists is a tier key or order already taken.
 	ErrTierExists = code.New("flags.tier_exists")
+	// ErrTierInvalid is a tier with a malformed key, no name or a name over 120 characters, or an
+	// order outside 0–1000000.
+	ErrTierInvalid = code.New("flags.tier_invalid")
 )
 
 // Store persists tiers, flag states and account overrides (spec.md §3).
 type Store interface {
 	// Tiers returns the ladder, lowest first.
 	Tiers(ctx context.Context) ([]Tier, error)
-	// CreateTier adds a tier. ErrTierExists if its key or order is taken.
+	// CreateTier adds a tier. ErrTierExists if its key or order is taken; ErrTierInvalid if it is
+	// malformed.
 	CreateTier(ctx context.Context, t Tier) error
 	SetTierEnabled(ctx context.Context, id ids.UUID, enabled bool) error
 
@@ -36,6 +40,12 @@ type Store interface {
 	SetAccountFlag(ctx context.Context, account ids.UUID, key string, enabled bool) error
 	// ClearAccountFlag removes an override; removing one that isn't there is not an error.
 	ClearAccountFlag(ctx context.Context, account ids.UUID, key string) error
+}
+
+// ValidTier reports whether a tier may be stored, for a store that checks before it writes.
+func ValidTier(t Tier) bool {
+	n := len([]rune(t.Name))
+	return keyRe.MatchString(t.Key) && n >= 1 && n <= 120 && t.Order >= 0 && t.Order <= 1000000
 }
 
 // Service reconciles and resolves flags against a store.

@@ -7,25 +7,27 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nickwhiteley/plinth/fixture"
 	"github.com/nickwhiteley/plinth/flags"
 	"github.com/nickwhiteley/plinth/ids"
 	"github.com/nickwhiteley/plinth/quotas"
 )
 
-// Run runs the suite. factory returns an empty quota store over an empty tier store.
-func Run(t *testing.T, factory func(t *testing.T) (quotas.Store, flags.Store)) {
-	for name, f := range map[string]func(*testing.T, quotas.Store, flags.Store){
+// Run runs the suite. factory returns an empty quota store over an empty tier store, and the
+// fixtures (accounts) its overrides reference.
+func Run(t *testing.T, factory func(t *testing.T) (quotas.Store, flags.Store, fixture.Source)) {
+	for name, f := range map[string]func(*testing.T, quotas.Store, flags.Store, fixture.Source){
 		"keys":      testKeys,
 		"limits":    testLimits,
 		"overrides": testOverrides,
 	} {
-		t.Run(name, func(t *testing.T) { q, fl := factory(t); f(t, q, fl) })
+		t.Run(name, func(t *testing.T) { q, fl, fx := factory(t); f(t, q, fl, fx) })
 	}
 }
 
 func n(v int64) *int64 { return &v }
 
-func testKeys(t *testing.T, s quotas.Store, _ flags.Store) {
+func testKeys(t *testing.T, s quotas.Store, _ flags.Store, _ fixture.Source) {
 	ctx := context.Background()
 	for _, k := range []quotas.KeyState{{Key: "zeta", Unit: quotas.UnitTokens}, {Key: "alpha", Unit: quotas.UnitCount}} {
 		if err := s.InsertQuotaKey(ctx, k); err != nil {
@@ -50,10 +52,10 @@ func testKeys(t *testing.T, s quotas.Store, _ flags.Store) {
 	}
 }
 
-func testLimits(t *testing.T, s quotas.Store, fl flags.Store) {
+func testLimits(t *testing.T, s quotas.Store, fl flags.Store, _ fixture.Source) {
 	ctx := context.Background()
-	free := flags.Tier{ID: ids.New(), Key: "free", Order: 1, Enabled: true}
-	pro := flags.Tier{ID: ids.New(), Key: "pro", Order: 2, Enabled: true}
+	free := flags.Tier{ID: ids.New(), Key: "free", Name: "Free", Order: 1, Enabled: true}
+	pro := flags.Tier{ID: ids.New(), Key: "pro", Name: "Pro", Order: 2, Enabled: true}
 	for _, tr := range []flags.Tier{free, pro} {
 		if err := fl.CreateTier(ctx, tr); err != nil {
 			t.Fatal(err)
@@ -100,14 +102,14 @@ func testLimits(t *testing.T, s quotas.Store, fl flags.Store) {
 	}
 }
 
-func testOverrides(t *testing.T, s quotas.Store, _ flags.Store) {
+func testOverrides(t *testing.T, s quotas.Store, _ flags.Store, fx fixture.Source) {
 	ctx := context.Background()
 	for _, k := range []string{"projects_max", "tokens_daily"} {
 		if err := s.InsertQuotaKey(ctx, quotas.KeyState{Key: k, Unit: quotas.UnitCount}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	a, b, support := ids.New(), ids.New(), ids.New()
+	a, b, support := fx.Account(t), fx.Account(t), fx.Account(t)
 	at := time.Now().UTC().Truncate(time.Microsecond)
 	expires := at.Add(24 * time.Hour)
 	o := quotas.Override{AccountID: a, Key: "tokens_daily", Limit: n(500000), Reason: "a demo for a client", ExpiresAt: &expires, GrantedBy: support, GrantedAt: at}

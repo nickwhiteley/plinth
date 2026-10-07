@@ -19,3 +19,9 @@ db-up: ## Postgres 18 in Docker on localhost:5435, beside a product's on 5434
 
 db-down: ## stop and remove the test database
 	docker rm -f $(PG_CONTAINER)
+
+TEST_DB_URL := postgres://postgres:plinth@localhost:$(PG_PORT)/plinth?sslmode=disable
+
+.PHONY: test-db
+test-db: ## the conformance suites, migrations and role checks against Postgres (needs make db-up)
+	PLINTH_TEST_DATABASE_URL=$(TEST_DB_URL) go test -count=1 ./...

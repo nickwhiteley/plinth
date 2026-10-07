@@ -54,10 +54,11 @@ its own schedule.
 | `usage` | (new: Bloomprint's is analytics) | The quota day and the check against a limit. It decides, and the product counts (§13) | 1.4 |
 | `billing` | `internal/billing` | Tiers, prices, subscriptions and the stub provider | Furniture Magic 8.3 |
 | `email` | `internal/email` | Sending (Postmark, and a logging sender for development), kinds, the communication log, and i18n | 1.5 |
-| `shadowlog` | `internal/db` migrations | The `shadow()` migration helper, the log trigger, the exclusion registry and the boot checks | 1.5 |
-| `db` | `internal/db` | Opening the pool, the transaction helper that sets the actor, migration running (§4) and the table manifest | 1.5 |
+| `shadowlog` | spike 0.1 | The boot checks. The `shadow()` helper, the log trigger and the exclusion registry are SQL in `migrations` (§4, §5) | 1.5 |
+| `db` | `internal/db` | Opening the pool, the transaction helper that sets the actor, the forward-only migration runner, and the table manifest and its grants (§3, §4) | 1.5 |
+| `migrations` | (new) | `plinth`'s migration stream and table manifest (§4) | 1.5 |
 | `code` | (new) | Error values: a stable code and string parameters (§9) | 1.1 |
-| `storetest` | `internal/store/storetest` | Per-schema test databases and the conformance-suite harness | 1.5 |
+| `pgtest`, `fixture` | `internal/store/storetest` | Per-schema test databases, and the rows a conformance suite needs from other packages (§11) | 1.5 |
 | `dataapi` | the `data-api` repository | The extraction routes over the `(txid, log_id)` cursor | 1.6 |
 | `rbac` | Bloomprint's admin role, generalised | System permissions declared in code and reconciled at boot, roles as data, role grants to accounts, and the last-holder guard | Furniture Magic 8.1 |
 | `blob` | `internal/blob` | An object store behind one interface (get, put, conditional put, delete, list), with a local directory for development and Vercel Blob, plus the `blob_object` metadata table. S3 and others are further implementations. | Furniture Magic 6.3 |
@@ -85,6 +86,17 @@ package that stores anything provides:
 
 A product's tests use `mem`. The conformance suites are what make that safe.
 
+**Postgres stores** (`<package>/pg`) use two helpers from `db`:
+- **`db.Run(ctx, pool, fn)`** runs a write in a transaction, or joins the one `ctx` already
+  carries, so a product's write and a `plinth` write commit together.
+- **`db.Q(ctx, pool)`** reads through that transaction if there is one.
+
+They map the constraint names a write can violate to their package's codes.
+
+**Cross-package foreign keys.** A conformance suite that needs another package's rows (an
+account, a tier) asks a `fixture.Source` for them: `fixture.Minted` mints bare ids for memory,
+and `pgtest.Fixtures` inserts real rows, so the foreign keys are exercised too.
+
 **Transactions and attribution.** Who is acting is carried on the context (`actor.With`). Every
 write runs in a transaction that has run `set_config('app.modified_by', <account uuid>, true)`
 first, from `actor.From`, so the shadow log records who made the change. An in-memory store keeps
@@ -98,33 +110,64 @@ context and never opens its own, so a product's write and a `plinth` write commi
 foreign keys reference them, most often `account (id)`. Like the product's, `plinth`'s migrations
 **never name a schema or a role**.
 
-**Migrations ship in the module.**
-- Each package embeds its migrations, and `plinth` exposes them as one ordered set.
-- A product's migrate command applies `plinth`'s set **before** its own, with its own version
-  table, `plinth_schema_version`. The two version sequences are independent.
+**Migrations ship in the module,** as one stream: `migrations.Plinth`, embedded SQL files named
+`NNNN_description.sql`, with the version table `plinth_schema_version`.
+- A product applies `plinth`'s stream **before** its own, with the same runner and its own
+  version table. The two version sequences are independent.
 - **A product never alters a `plinth` table.** It extends one with its own table keyed by the
   same id (§6).
 - **Once released, `plinth`'s migrations are additive only.** The warehouse reads these tables
   under a published contract, so a column is never renamed, retyped or dropped. A new major
   version may break this, and says how in its release notes.
 - **Every column carries a `COMMENT`.** That's the warehouse contract, as for the product's
-  tables.
-- **Every table is created with `shadow()`,** which `plinth`'s first migration installs, unless
-  it's registered as exempt (sessions and tokens).
+  tables. A test checks every column of every table and log twin.
+- **Every constraint is named** `<table>_<what>_<pk|fk|uq|ck>`, because stores map constraint
+  names to codes. A test checks every one.
 
-**The table manifest.** For each table, `plinth` declares in Go:
-- its **class**: entity (soft-deleted), link (hard-deleted), ephemeral (hard-deleted and
-  unlogged), append-only, or reference (reconciled from code)
-- its **secret columns** (`password_hash`, `google_subject`, `token_hash`, settings ciphertext)
-- whether the runtime role may **delete** from it
+**The runner (`db.Migrate`)** is forward-only. There are no down migrations, and a `.down` file is
+refused, because a down that drops a log table destroys audit history.
+- It runs as the migration login, after `SET ROLE <owner>`, so the owner owns every object.
+- Each file runs in its own transaction, under one advisory lock, so two deploys can't migrate
+  at once.
+- **It refuses** a file whose checksum differs from the one recorded when it was applied
+  (`db.migration_changed`: released migrations are never edited). It also refuses a database
+  that has applied a version this code doesn't have (`db.migration_unknown`: the code is older
+  than the database).
 
-A product's grants step reads the manifest, so `plinth`'s tables get exactly the treatment the
-product's own get:
-- the runtime role's `DELETE` list
-- the read-only role's column allowlist, which leaves secret columns out
-- the log exclusions
+**The shadow log (`0001_shadow`)** is spike 0.1's, schema- and role-free:
+- `log_exclusion` lives in the log schema, and `exclude_from_log(table, column, reason)`
+  registers a column there.
+- The statement-level `shadow_log_stmt()` trigger is `SECURITY DEFINER` and owned by the owner.
+  It writes one `INSERT … SELECT` per statement, and attributes it from `app.modified_by`.
+- **`shadow(t, partitioned, guard, noop)`** is called after a table's `CREATE` and `COMMENT`s:
+  - It creates the log twin with its `(txid, log_id)` cursor index, copying the table's column
+    comments.
+  - It adds `_00_pk_immutable`, an optional `_00_guard` (a product's frozen-content guard),
+    optional `_05_noop`, and `_10_touch` (setting `updated_by` from the actor where the column
+    exists).
+  - It adds the three `_20_log` triggers.
+- A base column that is neither in the log twin nor excluded fails the next write, loudly.
 
-A conformance test checks the manifest against the database's catalogue.
+**The table manifest** (`db.Table`; `plinth`'s is `migrations.Tables`) declares for each table:
+- **its class:**
+  - `entity`: soft-deleted
+  - `reference`: reconciled or configured, never deleted
+  - `link`: hard-deleted, and logged
+  - `ephemeral`: hard-deleted, and not logged
+  - `internal`: a version table, nobody's but the owner's
+- **its secret columns,** which no read-only or extract role reads and the log never keeps
+- **`NoExtract`,** which withholds its log twin from the extract role. Settings use it: their
+  ciphertext is kept in the log for history, but the warehouse has no use for it.
+
+**`db.Grant(roles, tables)`** applies the manifest, `plinth`'s and the product's together, as the
+owner on every deploy:
+- The runtime role gets `SELECT, INSERT, UPDATE` on every non-internal table, `DELETE` only on
+  link and ephemeral ones, and `SELECT` on the log.
+- The extract role gets the log only.
+- The read-only role gets a column allowlist without secrets, and the log.
+
+`db.CheckManifest` compares the manifest with the catalogue: unlisted or missing tables, log
+twins that shouldn't or should exist, and secrets in a log.
 
 ## 5. Database roles
 
@@ -134,15 +177,23 @@ data-model §2), and checks it:
   object.
 - **The runtime role** can't change the schema or write the log schema.
 - **The extract role** reads only the log schema and the `<app>_extract` views.
-- **`shadowlog`'s boot checks** refuse to start in production, and warn elsewhere, if the
-  runtime role:
+- **`shadowlog.Check`** is the boot check. A product refuses to start in production, and warns
+  elsewhere, if the runtime role (`shadowlog.unsafe_role`):
   - is a superuser, or has `CREATEROLE`, `CREATEDB`, `BYPASSRLS` or `REPLICATION`
   - is a member of `pg_write_all_data`, `pg_read_all_data` or `pg_execute_server_program`
   - owns any table
   - can `SET ROLE` to the owner
 
 The product passes in the role names. They may come from connection strings
-(`RuntimeRoleFrom`, as in Bloomprint).
+(`RuntimeRoleFrom`, as in Bloomprint). A role-separation test logs in as each role and proves the
+runtime role:
+- can't write, rewrite or delete the log
+- can't edit the exclusions
+- can't delete an entity
+- can't truncate, create a table, disable a trigger, read the version table, or become the owner
+
+It also proves the extract role can't see the app schema, and the read-only role can't read a
+secret column.
 
 ## 6. Accounts: where `plinth` stops
 
@@ -253,13 +304,20 @@ or a quota, never a setting.
 
 ## 11. Testing
 
-- `make test` runs the unit tests and the conformance suites against `mem`.
-- `make test-db` runs the conformance suites, the manifest check, the role-separation checks
-  and the migration checks against Postgres 18. `make db-up` starts it in Docker on port 5435,
-  so it can run beside a product's database on 5434.
-- **Each test gets its own schema pair** (`<schema>` and `<schema>_log`). That's why there are no
-  extensions: an extension is per database, not per schema.
-- CI runs both, plus `go vet` and `gofmt`, on every push and pull request.
+- `make test` runs the unit tests and the conformance suites against the in-memory stores.
+- `make test-db` runs everything against Postgres 18, including the Postgres stores' conformance
+  suites, the migrations, the comment and naming checks, the manifest check, and role separation.
+  - `make db-up` starts Postgres 18 in Docker on port 5435, so it can run beside a product's
+    database on 5434.
+  - `make test-db` sets `PLINTH_TEST_DATABASE_URL`. Without it, Postgres tests skip, so
+    `make test` runs anywhere.
+- **Each test gets its own schema pair** (`pgtest.New`: `t_<random>` and `t_<random>_log`), with
+  `plinth`'s migrations applied. That's why there are no extensions: an extension is per
+  database, not per schema.
+- **One conformance suite per store,** run against both `mem` and `pg`. A behaviour the two
+  disagree on is a suite gap, closed by adding the case.
+- CI runs `make lint` and `make test`, and a Postgres 18 service job runs `make test-db`, on
+  every push and pull request.
 - **Test first:** a lifted package arrives with its Bloomprint tests passing, and changes are
   driven by a failing test.
 
@@ -314,6 +372,9 @@ unchanged, and so do its tests.
 - **`Authenticate(token)`** returns the account, and refuses an unknown, expired or inactive
   one.
 - **`Deactivate`** ends every session. **`Reactivate`** lets the account sign in again.
+- **The data model's `account_identity_ct`** (a local subject must name a live identity) is not
+  built. The subject is the `idn_` form, which SQL can't parse cheaply, and `Admit` only ever
+  creates an account from an identity the provider has just proved.
 - **A crash between steps heals.** If a local sign-up creates the identity but not the account,
   the next sign-in creates the account. Concurrent first sign-ins create one account.
 - **A new profile** takes the provider's name, or the address's local part, as its display name.

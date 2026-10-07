@@ -6,18 +6,20 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/nickwhiteley/plinth/fixture"
 	"github.com/nickwhiteley/plinth/flags"
 	"github.com/nickwhiteley/plinth/ids"
 )
 
-// Run runs the suite. factory returns an empty store for each case.
-func Run(t *testing.T, factory func(t *testing.T) flags.Store) {
-	for name, f := range map[string]func(*testing.T, flags.Store){
+// Run runs the suite. factory returns an empty store for each case, and the fixtures (accounts)
+// its overrides reference.
+func Run(t *testing.T, factory func(t *testing.T) (flags.Store, fixture.Source)) {
+	for name, f := range map[string]func(*testing.T, flags.Store, fixture.Source){
 		"tiers":     testTiers,
 		"flags":     testFlags,
 		"overrides": testOverrides,
 	} {
-		t.Run(name, func(t *testing.T) { f(t, factory(t)) })
+		t.Run(name, func(t *testing.T) { s, fx := factory(t); f(t, s, fx) })
 	}
 }
 
@@ -25,7 +27,7 @@ func tier(key string, order int) flags.Tier {
 	return flags.Tier{ID: ids.New(), Key: key, Name: key, Order: order, Enabled: true}
 }
 
-func testTiers(t *testing.T, s flags.Store) {
+func testTiers(t *testing.T, s flags.Store, _ fixture.Source) {
 	ctx := context.Background()
 	pro, free := tier("pro", 20), tier("free", 10)
 	for _, tr := range []flags.Tier{pro, free} {
@@ -43,6 +45,15 @@ func testTiers(t *testing.T, s flags.Store) {
 	if err := s.CreateTier(ctx, tier("plus", 20)); !errors.Is(err, flags.ErrTierExists) {
 		t.Errorf("a duplicate order = %v", err)
 	}
+	for name, bad := range map[string]flags.Tier{
+		"no name":      {ID: ids.New(), Key: "plus", Order: 15},
+		"a bad key":    {ID: ids.New(), Key: "Plus Tier", Name: "Plus", Order: 15},
+		"a huge order": {ID: ids.New(), Key: "plus", Name: "Plus", Order: 2000000},
+	} {
+		if err := s.CreateTier(ctx, bad); !errors.Is(err, flags.ErrTierInvalid) {
+			t.Errorf("%s = %v", name, err)
+		}
+	}
 	if err := s.SetTierEnabled(ctx, pro.ID, false); err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +65,7 @@ func testTiers(t *testing.T, s flags.Store) {
 	}
 }
 
-func testFlags(t *testing.T, s flags.Store) {
+func testFlags(t *testing.T, s flags.Store, _ fixture.Source) {
 	ctx := context.Background()
 	pro := tier("pro", 20)
 	if err := s.CreateTier(ctx, pro); err != nil {
@@ -103,14 +114,14 @@ func testFlags(t *testing.T, s flags.Store) {
 	}
 }
 
-func testOverrides(t *testing.T, s flags.Store) {
+func testOverrides(t *testing.T, s flags.Store, fx fixture.Source) {
 	ctx := context.Background()
 	for _, k := range []string{"one", "two"} {
 		if err := s.InsertFlag(ctx, flags.State{Key: k}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	a, b := ids.New(), ids.New()
+	a, b := fx.Account(t), fx.Account(t)
 	if err := s.SetAccountFlag(ctx, a, "one", true); err != nil {
 		t.Fatal(err)
 	}
