@@ -7,21 +7,22 @@ import (
 	"testing"
 
 	"github.com/nickwhiteley/plinth/actor"
-	"github.com/nickwhiteley/plinth/ids"
+	"github.com/nickwhiteley/plinth/fixture"
 	"github.com/nickwhiteley/plinth/settings"
 )
 
-// Run runs the suite. factory returns an empty store for each case.
-func Run(t *testing.T, factory func(t *testing.T) settings.Store) {
-	for name, f := range map[string]func(*testing.T, settings.Store){
+// Run runs the suite. factory returns an empty store for each case, and the fixtures (an account
+// to act as) its writes may reference.
+func Run(t *testing.T, factory func(t *testing.T) (settings.Store, fixture.Source)) {
+	for name, f := range map[string]func(*testing.T, settings.Store, fixture.Source){
 		"rows":    testRows,
 		"history": testHistory,
 	} {
-		t.Run(name, func(t *testing.T) { f(t, factory(t)) })
+		t.Run(name, func(t *testing.T) { s, fx := factory(t); f(t, s, fx) })
 	}
 }
 
-func testRows(t *testing.T, s settings.Store) {
+func testRows(t *testing.T, s settings.Store, _ fixture.Source) {
 	ctx := context.Background()
 	if rows, err := s.Settings(ctx); err != nil || len(rows) != 0 {
 		t.Fatalf("an empty store: %v, %v", rows, err)
@@ -60,12 +61,12 @@ func testRows(t *testing.T, s settings.Store) {
 	}
 }
 
-func testHistory(t *testing.T, s settings.Store) {
+func testHistory(t *testing.T, s settings.Store, fx fixture.Source) {
 	ctx := context.Background()
 	if err := s.InsertSetting(ctx, settings.Row{Key: "app_url", Value: []byte("v0"), KeyVersion: 1}); err != nil {
 		t.Fatal(err)
 	}
-	who := ids.New()
+	who := fx.Account(t)
 	for _, v := range []string{"v1", "v2"} {
 		if err := s.SetSetting(actor.With(ctx, who), "app_url", []byte(v), 1); err != nil {
 			t.Fatal(err)

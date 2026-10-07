@@ -3,6 +3,7 @@ package mem_test
 import (
 	"testing"
 
+	"github.com/nickwhiteley/plinth/fixture"
 	"github.com/nickwhiteley/plinth/flags"
 	flagsmem "github.com/nickwhiteley/plinth/flags/mem"
 	"github.com/nickwhiteley/plinth/quotas"
@@ -11,8 +12,8 @@ import (
 )
 
 func TestConformance(t *testing.T) {
-	storetest.Run(t, func(*testing.T) (quotas.Store, flags.Store) {
+	storetest.Run(t, func(*testing.T) (quotas.Store, flags.Store, fixture.Source) {
 		fl := flagsmem.New()
-		return mem.New(fl), fl
+		return mem.New(fl), fl, fixture.Minted{}
 	})
 }

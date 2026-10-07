@@ -15,16 +15,20 @@ and its packages are lifted from Bloomprint with their tests. **`spec.md` is aut
 |---|---|
 | `code`: error values with a stable code and parameters | built |
 | `ids`: UUIDv7, prefixed Crockford ids, secret tokens | built |
-| `identity`: the local provider (passwords, reset and verification links, Google sign-in) | built, with its in-memory store; the Postgres store is planned (1.5) |
-| `account`: accounts, profiles and sessions | built, with its in-memory store; the Postgres store is planned (1.5) |
+| `identity`: the local provider (passwords, reset and verification links, Google sign-in) | built, with in-memory and Postgres stores |
+| `account`: accounts, profiles and sessions | built, with in-memory and Postgres stores |
 | `env`: the `.env` loader, for declared names only | built |
-| `settings`: declared, encrypted settings, the live snapshot and its write path | built, with its in-memory store; the Postgres store and the admin handler are planned (1.5, `rbac`) |
-| `alert`: errors from the log, rationed, redacted and mailed | built; the mail sink is planned (1.5) |
+| `settings`: declared, encrypted settings, the live snapshot and its write path | built, with in-memory and Postgres stores; the admin handler is planned (`rbac`) |
+| `alert`: errors from the log, rationed, redacted and mailed | built; the mail sink is planned (1.5b) |
 | `actor`: who is acting, for attribution | built |
-| `flags`: tiers and feature flags | built, with its in-memory store; the Postgres store is planned (1.5) |
-| `quotas`: limits by tier, with overrides | built, with its in-memory store; the Postgres store is planned (1.5) |
+| `flags`: tiers and feature flags | built, with in-memory and Postgres stores |
+| `quotas`: limits by tier, with overrides | built, with in-memory and Postgres stores |
 | `usage`: the quota day and the check | built |
-| `email`, `shadowlog`, `db`, `storetest` | planned (1.5) |
+| `db`: the pool, transactions, migrations, the manifest and grants | built |
+| `migrations`: plinth's schema, with the shadow log | built |
+| `shadowlog`: the boot checks | built |
+| `pgtest`, `fixture`: Postgres test schemas and fixtures | built |
+| `email` | planned (1.5b) |
 | `dataapi` | planned (1.6) |
 | `billing` | planned (Furniture Magic 8.3) |
 | `rbac`: system roles and permissions | planned (Furniture Magic 8.1) |
@@ -50,7 +54,7 @@ make test       # unit tests
 make lint       # go vet and gofmt
 make db-up      # Postgres 18 in Docker on localhost:5435 (beside a product's on 5434)
 make db-down    # stop it
-make test-db    # planned: the conformance suites and role checks against Postgres
+make test-db    # everything against Postgres 18: stores, migrations, role separation (needs make db-up)
 ```
 
 All work is on a branch and merges by pull request. CI runs `make lint` and `make test`, and an

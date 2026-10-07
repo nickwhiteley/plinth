@@ -26,9 +26,16 @@ func Run(t *testing.T, factory func(t *testing.T) identity.Store) {
 	}
 }
 
+// A well-formed hash: a store may check the shape it holds.
+const (
+	hash      = "$argon2id$v=19$m=65536,t=3,p=4$c2FsdHNhbHRzYWx0$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaGhhc2g"
+	rehashed  = "$argon2id$v=19$m=65536,t=3,p=4$b3RoZXJzYWx0$b3RoZXJoYXNob3RoZXJoYXNob3RoZXJoYXNob3RoZXI"
+	otherHash = "$argon2id$v=19$m=65536,t=3,p=4$YW5vdGhlcg$YW5vdGhlcmFub3RoZXJhbm90aGVyYW5vdGhlcmFub3RoZXI"
+)
+
 func mustIdentity(t *testing.T, s identity.Store, email string) identity.LocalIdentity {
 	t.Helper()
-	l := identity.LocalIdentity{ID: ids.New(), Email: email, PasswordHash: "hash", CreatedAt: time.Now().UTC().Truncate(time.Microsecond)}
+	l := identity.LocalIdentity{ID: ids.New(), Email: email, PasswordHash: hash, CreatedAt: time.Now().UTC().Truncate(time.Microsecond)}
 	if err := s.CreateIdentity(context.Background(), l); err != nil {
 		t.Fatalf("CreateIdentity(%s): %v", email, err)
 	}
@@ -50,19 +57,19 @@ func testIdentities(t *testing.T, s identity.Store) {
 	if err != nil {
 		t.Fatalf("IdentityByID: %v", err)
 	}
-	if got.Email != "nick@example.com" || got.PasswordHash != "hash" || !got.CreatedAt.Equal(l.CreatedAt) {
+	if got.Email != "nick@example.com" || got.PasswordHash != hash || !got.CreatedAt.Equal(l.CreatedAt) {
 		t.Errorf("round trip: %+v", got)
 	}
 
 	// An update persists the hash, and never moves the address: the uniqueness claim is keyed on
 	// it, so moving it here would leave the claim on an address the identity no longer has.
-	got.PasswordHash = "rehashed"
+	got.PasswordHash = rehashed
 	got.Email = "somewhere-else@example.com"
 	if err := s.UpdateIdentity(ctx, got); err != nil {
 		t.Fatalf("UpdateIdentity: %v", err)
 	}
 	after, _ := s.IdentityByID(ctx, l.ID)
-	if after.PasswordHash != "rehashed" || after.Email != "nick@example.com" {
+	if after.PasswordHash != rehashed || after.Email != "nick@example.com" {
 		t.Errorf("after update: %+v", after)
 	}
 	// An empty hash is how an identity with no password is stored, and it must round-trip as
@@ -86,7 +93,7 @@ func testIdentities(t *testing.T, s identity.Store) {
 	}
 
 	// A second identity on the address, in any casing, is refused.
-	dup := identity.LocalIdentity{ID: ids.New(), Email: "NICK@example.com", PasswordHash: "other", CreatedAt: time.Now()}
+	dup := identity.LocalIdentity{ID: ids.New(), Email: "NICK@example.com", PasswordHash: otherHash, CreatedAt: time.Now()}
 	if err := s.CreateIdentity(ctx, dup); !errors.Is(err, identity.ErrEmailTaken) {
 		t.Errorf("duplicate CreateIdentity = %v, want ErrEmailTaken", err)
 	}

@@ -153,3 +153,18 @@ func TestTokensAreRandomAndOnlyTheirHashIsKept(t *testing.T) {
 		t.Fatal("HashToken is SHA-256 of the token as sent")
 	}
 }
+
+func TestScanAndValue(t *testing.T) {
+	u := New()
+	v, _ := u.Value()
+	var back UUID
+	if err := back.Scan(v); err != nil || back != u {
+		t.Fatalf("text round trip: %v %v", back, err)
+	}
+	if err := back.Scan([]byte(u[:])); err != nil || back != u {
+		t.Fatalf("binary: %v", err)
+	}
+	if err := back.Scan(42); err == nil {
+		t.Fatal("scanned an int")
+	}
+}

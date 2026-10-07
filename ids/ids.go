@@ -9,6 +9,7 @@ package ids
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql/driver"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
@@ -193,3 +194,29 @@ func Token() string {
 
 // HashToken is the stored form of a token: SHA-256 of the token as sent.
 func HashToken(token string) [32]byte { return sha256.Sum256([]byte(token)) }
+
+// Value lets a UUID be a query argument.
+func (u UUID) Value() (driver.Value, error) { return u.String(), nil }
+
+// Scan reads a uuid column, in the text or binary form a driver hands over.
+func (u *UUID) Scan(src any) error {
+	switch v := src.(type) {
+	case string:
+		p, err := ParseUUID(v)
+		if err != nil {
+			return err
+		}
+		*u = p
+		return nil
+	case []byte:
+		if len(v) == 16 {
+			copy(u[:], v)
+			return nil
+		}
+		return u.Scan(string(v))
+	case [16]byte:
+		*u = v
+		return nil
+	}
+	return errSyntax.With("input", "scan")
+}

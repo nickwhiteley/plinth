@@ -47,5 +47,5 @@ make test       # unit tests and the conformance suites against the in-memory st
 make lint       # go vet and gofmt
 make db-up      # Postgres 18 in Docker on :5435
 make db-down
-make test-db    # (planned) the conformance suites and role checks against Postgres
+make test-db    # everything against Postgres 18 (needs make db-up)
 ```

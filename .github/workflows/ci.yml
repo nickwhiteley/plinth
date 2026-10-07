@@ -1,5 +1,5 @@
 # What `make lint` and `make test` do locally, run on every push and pull request.
-# A Postgres job joins when the first store lands (spec.md §11, `make test-db`).
+# The Postgres job runs the conformance suites, migrations and role checks (`make test-db`).
 name: CI
 
 on:
@@ -24,3 +24,26 @@ jobs:
         run: make lint
       - name: Test
         run: make test
+
+  postgres:
+    name: Postgres
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: plinth
+          POSTGRES_DB: plinth
+        ports: ["5435:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d plinth"
+          --health-interval 2s --health-timeout 5s --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Test against Postgres
+        run: make test-db

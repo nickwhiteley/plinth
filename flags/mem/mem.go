@@ -41,6 +41,9 @@ func (s *Store) Tiers(context.Context) ([]flags.Tier, error) {
 }
 
 func (s *Store) CreateTier(_ context.Context, t flags.Tier) error {
+	if !flags.ValidTier(t) {
+		return flags.ErrTierInvalid
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, o := range s.tiers {
