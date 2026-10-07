@@ -88,6 +88,34 @@ func (s *Store) TouchSignIn(_ context.Context, id ids.UUID, at time.Time) error 
 	return nil
 }
 
+func (s *Store) SetTier(_ context.Context, id ids.UUID, tier ids.UUID, override *ids.UUID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, ok := s.accounts[id]
+	if !ok {
+		return account.ErrNotFound
+	}
+	if override != nil {
+		o := *override
+		override = &o
+	}
+	a.TierID, a.TierOverrideID = tier, override
+	s.accounts[id] = a
+	return nil
+}
+
+func (s *Store) SetQuotaTimeZone(_ context.Context, id ids.UUID, zone string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, ok := s.accounts[id]
+	if !ok {
+		return account.ErrNotFound
+	}
+	a.QuotaTimeZone = zone
+	s.accounts[id] = a
+	return nil
+}
+
 func (s *Store) Profile(_ context.Context, id ids.UUID) (account.Profile, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

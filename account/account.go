@@ -44,6 +44,8 @@ var (
 	ErrIdentityTaken = code.New("account.identity_taken")
 	// ErrIdentityInvalid is an Identity with no issuer or subject: a programming error upstream.
 	ErrIdentityInvalid = code.New("account.identity_invalid")
+	// ErrNoDefaultTier is creating an account on a service with no default tier configured.
+	ErrNoDefaultTier = code.New("account.no_default_tier")
 	// ErrTimeZoneInvalid and ErrLocaleInvalid are bad profile defaults.
 	ErrTimeZoneInvalid = code.New("account.time_zone_invalid")
 	ErrLocaleInvalid   = code.New("account.locale_invalid")
@@ -54,11 +56,26 @@ type Account struct {
 	ID              ids.UUID
 	IdentityIssuer  string
 	IdentitySubject string
+	// TierID is the account's tier; TierOverrideID, when set, is the tier support has put it on
+	// instead (a trial, a partner). EffectiveTier is the one that counts.
+	TierID         ids.UUID
+	TierOverrideID *ids.UUID
+	// QuotaTimeZone is where the quota day runs midnight to midnight. Copied from the profile at
+	// creation and changed only by support, so changing the profile's zone can't reset a quota early.
+	QuotaTimeZone string
 	// Active is false for a deactivated account, which can't sign in and holds no sessions.
 	Active         bool
 	DeactivatedAt  *time.Time
 	LastSignedInAt *time.Time
 	CreatedAt      time.Time
+}
+
+// EffectiveTier is the tier flags and quotas resolve on: the override if there is one.
+func (a Account) EffectiveTier() ids.UUID {
+	if a.TierOverrideID != nil {
+		return *a.TierOverrideID
+	}
+	return a.TierID
 }
 
 // Profile is a row of account_profile: a cache of facts the identity owns, plus the person's
@@ -94,6 +111,10 @@ type Store interface {
 	SetActive(ctx context.Context, id ids.UUID, active bool, at time.Time) error
 	// TouchSignIn records a sign-in.
 	TouchSignIn(ctx context.Context, id ids.UUID, at time.Time) error
+	// SetTier moves an account to a tier, and sets or clears its override.
+	SetTier(ctx context.Context, id ids.UUID, tier ids.UUID, override *ids.UUID) error
+	// SetQuotaTimeZone is support's change to where the quota day runs.
+	SetQuotaTimeZone(ctx context.Context, id ids.UUID, zone string) error
 
 	Profile(ctx context.Context, accountID ids.UUID) (Profile, error)
 	// RefreshProfileEmail updates the cached email from the identity.
@@ -111,8 +132,9 @@ type Store interface {
 
 // Service admits identities and resolves sessions.
 type Service struct {
-	store Store
-	now   func() time.Time
+	store       Store
+	now         func() time.Time
+	defaultTier ids.UUID
 }
 
 // Option configures a Service.
@@ -120,6 +142,10 @@ type Option func(*Service)
 
 // WithClock sets the service's clock. For tests.
 func WithClock(now func() time.Time) Option { return func(s *Service) { s.now = now } }
+
+// WithDefaultTier is the tier new accounts start on. Tiers are configuration, so the product
+// reads it from its own tier data (the lowest enabled tier, usually) and passes it in.
+func WithDefaultTier(tier ids.UUID) Option { return func(s *Service) { s.defaultTier = tier } }
 
 func New(store Store, opts ...Option) *Service {
 	s := &Service{store: store, now: time.Now}
@@ -207,7 +233,11 @@ func (s *Service) create(ctx context.Context, id identity.Identity, np NewProfil
 	if !localeRe.MatchString(np.Locale) {
 		return Account{}, ErrLocaleInvalid.With("locale", np.Locale)
 	}
-	a := Account{ID: ids.NewAt(now, rand.Reader), IdentityIssuer: id.Issuer, IdentitySubject: id.Subject, Active: true, CreatedAt: now}
+	if s.defaultTier.IsZero() {
+		return Account{}, ErrNoDefaultTier
+	}
+	a := Account{ID: ids.NewAt(now, rand.Reader), IdentityIssuer: id.Issuer, IdentitySubject: id.Subject, TierID: s.defaultTier,
+		QuotaTimeZone: np.TimeZone, Active: true, CreatedAt: now}
 	email := identity.NormaliseEmail(id.Email)
 	p := Profile{AccountID: a.ID, DisplayName: displayName(id.Name, email), TimeZone: np.TimeZone, Locale: np.Locale, Email: email, RefreshedAt: now}
 	if err := s.store.CreateAccount(ctx, a, p); err != nil {
@@ -278,6 +308,19 @@ func (s *Service) Deactivate(ctx context.Context, id ids.UUID) error {
 		return err
 	}
 	return s.store.DeleteSessionsForAccount(ctx, id)
+}
+
+// SetTier moves an account to a tier and sets or clears support's override.
+func (s *Service) SetTier(ctx context.Context, id ids.UUID, tier ids.UUID, override *ids.UUID) error {
+	return s.store.SetTier(ctx, id, tier, override)
+}
+
+// SetQuotaTimeZone is support's change to where an account's quota day runs.
+func (s *Service) SetQuotaTimeZone(ctx context.Context, id ids.UUID, zone string) error {
+	if _, err := time.LoadLocation(zone); err != nil || zone == "Local" || zone == "" {
+		return ErrTimeZoneInvalid.With("time_zone", zone)
+	}
+	return s.store.SetQuotaTimeZone(ctx, id, zone)
 }
 
 // Reactivate lets a deactivated account sign in again.

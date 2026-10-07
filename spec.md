@@ -49,9 +49,9 @@ its own schedule.
 | `identity` | `internal/auth`, split | What a provider proves, and the local provider: passwords, reset and verification links, and Google sign-in (§12) | 1.2 |
 | `account` | `internal/auth`, split | Accounts, their profile cache and their sessions, keyed to an identity by (issuer, subject) (§12) | 1.2 |
 | `ids` | `internal/ids`, and Furniture Magic's `engine/ident` | UUIDv7, prefixed Crockford ids, and secret tokens (§7) | 1.2 |
-| `flags` | `internal/flags` | Feature flags by tier, with per-account overrides | 1.4 |
-| `quotas` | `internal/quotas` | Limits by tier with per-account overrides, and reservation | 1.4 |
-| `usage` | `internal/usage` | Metered usage counted against quotas | 1.4 |
+| `flags` | `internal/flags` | Tiers, and feature flags by tier with per-account overrides (§13) | 1.4 |
+| `quotas` | `internal/quotas` | Limits by tier, inherited up the ladder, with per-account overrides that can expire (§13) | 1.4 |
+| `usage` | (new: Bloomprint's is analytics) | The quota day and the check against a limit. It decides, and the product counts (§13) | 1.4 |
 | `billing` | `internal/billing` | Tiers, prices, subscriptions and the stub provider | Furniture Magic 8.3 |
 | `email` | `internal/email` | Sending (Postmark, and a logging sender for development), kinds, the communication log, and i18n | 1.5 |
 | `shadowlog` | `internal/db` migrations | The `shadow()` migration helper, the log trigger, the exclusion registry and the boot checks | 1.5 |
@@ -345,8 +345,11 @@ unchanged, and so do its tests.
 - An inactive account signing in gets `identity.invalid_credentials`, the same code as a wrong
   password.
 
-The tier and quota time zone join `account` with 1.4. Deletion events and erasure follow in
-Furniture Magic's 8.5.
+**Tiers and the quota day.** An account is on a tier, and support may put it on another
+instead (`tier_override_id`). `EffectiveTier` is the one flags and quotas resolve on. A new
+account starts on the tier the product configures (`WithDefaultTier`). Its quota time zone is
+copied from the profile at creation, and only support changes it. Deletion events and erasure
+follow in Furniture Magic's 8.5.
 
 ### 12.1 Google sign-in
 
@@ -368,7 +371,50 @@ Then, in order:
 
 An unverified Google address is refused.
 
-## 13. Bloomprint's move onto `plinth`
+## 13. Tiers, flags, quotas and usage
+
+**One mechanism**, as in Bloomprint: ordered tiers, flags with a minimum tier, per-account
+overrides, and quotas per tier.
+- **Tiers are configuration:** nothing in the source names one.
+- **A disabled tier** can't be chosen, but still holds its accounts and still passes its limits
+  up the ladder.
+
+**Flags (`flags`).**
+- **Declarations** are registered as settings' are: `Default`, `Operational` (a switch for
+  operators, not sold), and `Public` (described on a pricing page through message ids).
+- **State** is data: enabled, and an optional minimum tier by id.
+- **Resolution, in order:**
+  - an account override wins outright, in either direction
+  - a disabled or retired flag is off
+  - with no minimum, it's on
+  - otherwise it's on at or above the minimum
+- **Failing closed:** no tier, a tier the ladder doesn't hold, or a minimum the ladder doesn't
+  hold all resolve off.
+- **Unreconciled and stale flags:** a declared flag with no stored state is off. A stored flag
+  the source no longer declares is retired, never deleted.
+
+**Quotas (`quotas`).**
+- **A declaration** has a unit (`count`, `tokens`), a default (nil for unlimited) and a minimum.
+- **A limit resolves to:**
+  1. a live per-account override (with reason, grantor, grant time, and optional expiry)
+  2. the account's tier, or the nearest tier below it with a row (never one above). An explicit
+     "unlimited" row beats a number inherited from below.
+  3. the declared default
+  4. unlimited
+- **An unknown or missing tier** resolves as the lowest enabled tier.
+- **Downgrades take nothing away:** going over a limit locks and deletes nothing, and only
+  making another is refused.
+
+**Usage (`usage`)** decides and never counts. What has been used is the product's to sum.
+- **`Day`** is the quota day: midnight to midnight in the quota time zone, 23 or 25 hours long
+  when the clocks change.
+- **`Check`** refuses at the limit with `quota_exceeded` (with `quota`, `limit` and
+  `resets_at`).
+- **`Warning(0.8)`** is the 80% bar.
+- **Reservation** (Furniture Magic's assistant turns: an advisory lock, then a sum including
+  running turns' reservations) is the product's transaction, built on these.
+
+## 14. Bloomprint's move onto `plinth`
 
 Bloomprint changes only when it adopts `plinth`. It will then need these changes:
 - **Accounts:** its `User` splits into an identity and an account (§2, §6).
@@ -377,7 +423,7 @@ Bloomprint changes only when it adopts `plinth`. It will then need these changes
 - **Storage:** its single `store` package gives way to each package's own store (§3).
 - **Blob storage:** its Vercel Blob credentials move from the environment to settings.
 
-## 14. Open questions
+## 15. Open questions
 
 1. **Billing tables.** These are reviewed once the difference between what Bloomprint and
    Furniture Magic need from billing is known. Until then, `billing` is lifted as Bloomprint has
