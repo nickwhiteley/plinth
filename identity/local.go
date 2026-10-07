@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/mail"
+	"slices"
 	"strings"
 	"time"
 
@@ -162,7 +163,8 @@ func (l *Local) confirm(li LocalIdentity, password string) error {
 //
 // The password is required: the address is where recovery goes, so somebody with a borrowed
 // session who could move it would own the account for good. The new address inherits no
-// verification, and every link in flight for the old one dies with it (see verificationHash).
+// verification, and every link in flight for the old one dies with it: a verification link can no
+// longer be derived (see verificationHash), and a reset link names the old address.
 func (l *Local) ChangeEmail(ctx context.Context, id ids.UUID, password, newEmail string) (string, error) {
 	newEmail = NormaliseEmail(newEmail)
 	if !validEmail(newEmail) {
@@ -226,8 +228,15 @@ func (l *Local) CompleteReset(ctx context.Context, token, password string) (Loca
 		return LocalIdentity{}, err
 	}
 	li, err := l.store.IdentityByID(ctx, t.IdentityID)
-	if err != nil {
+	if errors.Is(err, ErrNotFound) {
+		return LocalIdentity{}, ErrInvalidCredentials
+	} else if err != nil {
 		return LocalIdentity{}, err
+	}
+	// A reset link is tied to the address it was sent to, like a verification link: if the
+	// identity has moved since, the link proves nothing about the address it now has.
+	if NormaliseEmail(t.Email) != li.Email {
+		return LocalIdentity{}, ErrInvalidCredentials
 	}
 	li.PasswordHash = encoded
 	if err := l.store.UpdateIdentity(ctx, li); err != nil {
@@ -348,6 +357,15 @@ func (l *Local) SignInWithGoogle(ctx context.Context, ext ExternalIdentity) (Ide
 
 	li, err := l.store.IdentityByGoogleSubject(ctx, ext.Subject)
 	if err == nil {
+		// A combine interrupted between linking and removing the planted password leaves a
+		// linked, unverified identity holding the address Google has just proved. Finish it here,
+		// or the planted password stays a way in (plinth#2 review). An identity that moved to a
+		// new, unverified address keeps its password: Google hasn't proved that one.
+		if !li.EmailVerified() && slices.Contains(EmailAliases(email), li.Email) {
+			if li, err = l.strip(ctx, li); err != nil {
+				return Identity{}, false, err
+			}
+		}
 		return withName(li), false, nil
 	} else if !errors.Is(err, ErrNotFound) {
 		return Identity{}, false, err
@@ -399,6 +417,20 @@ func (l *Local) combine(ctx context.Context, li LocalIdentity, ext ExternalIdent
 	li.GoogleSubject = ext.Subject
 	if li.EmailVerified() {
 		return li, nil // the identity proved this address itself: its password and sessions stand
+	}
+	return l.strip(ctx, li)
+}
+
+// strip is the pre-hijacking defence: Google's proof of the address outranks an unproved password
+// on it, so the password goes and the account's sessions end. Idempotent, so an interrupted
+// combine can be finished by the next sign-in.
+func (l *Local) strip(ctx context.Context, li LocalIdentity) (LocalIdentity, error) {
+	active, err := l.accounts.Active(ctx, IssuerLocal, ids.Identity.Format(li.ID))
+	if err != nil {
+		return LocalIdentity{}, err
+	}
+	if !active {
+		return LocalIdentity{}, ErrInvalidCredentials
 	}
 	now := l.now()
 	li.EmailVerifiedAt = &now
