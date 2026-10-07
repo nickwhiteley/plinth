@@ -17,7 +17,10 @@ and its packages are lifted from Bloomprint with their tests. **`spec.md` is aut
 | `ids`: UUIDv7, prefixed Crockford ids, secret tokens | built |
 | `identity`: the local provider (passwords, reset and verification links, Google sign-in) | built, with its in-memory store; the Postgres store is planned (1.5) |
 | `account`: accounts, profiles and sessions | built, with its in-memory store; the Postgres store is planned (1.5) |
-| `env`, `settings`, `alert` | planned (Furniture Magic task 1.3) |
+| `env`: the `.env` loader, for declared names only | built |
+| `settings`: declared, encrypted settings, the live snapshot and its write path | built, with its in-memory store; the Postgres store and the admin handler are planned (1.5, `rbac`) |
+| `alert`: errors from the log, rationed, redacted and mailed | built; the mail sink is planned (1.5) |
+| `actor`: who is acting, for attribution | built |
 | `flags`, `quotas`, `usage` | planned (1.4) |
 | `email`, `shadowlog`, `db`, `storetest` | planned (1.5) |
 | `dataapi` | planned (1.6) |

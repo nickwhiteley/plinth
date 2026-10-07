@@ -42,9 +42,10 @@ its own schedule.
 
 | Package | From Bloomprint | What it is | Furniture Magic task |
 |---|---|---|---|
-| `env` | `internal/env` | The `.env` loader. It never overrides the environment, and reads values literally (no expansion or quotes). | 1.3 |
-| `settings` | `internal/settings` | Declared, encrypted settings rows, reconciled at boot, a three-minute snapshot, and the `/admin/settings` handler | 1.3 |
-| `alert` | `internal/alert` | Errors reported from the log handler, rate-limited and redacted | 1.3 |
+| `env` | `internal/env` | The `.env` loader. It never overrides the environment, reads values literally, and sets only the names the product declares (§8) | 1.3 |
+| `settings` | `internal/settings` and `internal/bootstrap` | Declared, encrypted settings rows, reconciled at boot, a three-minute snapshot, bindings, and the write path. The `/admin/settings` handler comes with `rbac`, which guards it (§8) | 1.3 |
+| `alert` | `internal/alert` | Errors reported from the log handler, rate-limited and redacted. The product names itself in the subject. The mail sink comes with `email` | 1.3 |
+| `actor` | (new) | Who is acting, carried on the context, for attribution (§3) | 1.3 |
 | `identity` | `internal/auth`, split | What a provider proves, and the local provider: passwords, reset and verification links, and Google sign-in (§12) | 1.2 |
 | `account` | `internal/auth`, split | Accounts, their profile cache and their sessions, keyed to an identity by (issuer, subject) (§12) | 1.2 |
 | `ids` | `internal/ids`, and Furniture Magic's `engine/ident` | UUIDv7, prefixed Crockford ids, and secret tokens (§7) | 1.2 |
@@ -84,9 +85,11 @@ package that stores anything provides:
 
 A product's tests use `mem`. The conformance suites are what make that safe.
 
-**Transactions and attribution.** Every write runs in a transaction that has run
-`set_config('app.modified_by', <account uuid>, true)` first, so the shadow log records who made
-the change. The transaction helper does both. A `pg` store method takes the transaction from its
+**Transactions and attribution.** Who is acting is carried on the context (`actor.With`). Every
+write runs in a transaction that has run `set_config('app.modified_by', <account uuid>, true)`
+first, from `actor.From`, so the shadow log records who made the change. An in-memory store keeps
+the same attribution itself. A write with no actor is honestly authorless: seeding, or a system
+job. The transaction helper does both. A `pg` store method takes the transaction from its
 context and never opens its own, so a product's write and a `plinth` write commit together.
 
 ## 4. Schema and migrations
@@ -182,15 +185,49 @@ Package `ids`:
 
 ## 8. Configuration
 
-- **Settings are declared in Go by the package that reads them,** e.g. `email` declares
-  `email_provider_key` and `email_from`. A product declares its own beside them.
-- **The set is reconciled into `app_setting` at boot.** Every value is encrypted under
-  `ENCRYPTION_KEY`, secret or not. The values are re-read every three minutes, so a change needs
-  no deploy (Bloomprint's settings-in-the-database design).
-- **The environment** holds only what's needed to reach the database and decrypt the settings.
-  The product's spec lists those names and freezes the list.
-- **A flag is product, a setting is platform.** Anything that varies by account or tier is a
-  flag or a quota, never a setting.
+**The environment** holds only what's needed to reach the database and decrypt the settings.
+- The product's spec lists those names and freezes the list.
+- `env.Load(names...)` sets only the declared names from `.env`, never overriding the real
+  environment, and reports any other name in the file without setting it.
+- The encryption key's conventional name is `ENCRYPTION_KEY` (`settings.EnvEncryptionKey`). It's
+  required everywhere, with no default.
+
+**Settings are declared in Go by the package that reads them,** e.g. `identity` declares the
+Google credentials and `alert` the operations address and daily ceiling.
+- A product builds one `settings.Registry` at start-up from `settings.Core` (`app_url`,
+  `api_base_url`), the declarations of the packages it uses, and its own.
+- A key declared twice, a malformed key, or a default its own kind refuses panics.
+- **A declaration has no prose.** Its name, description and consequence are message ids
+  (`settings.<key>.name`), and every value or coherence problem is a code.
+- **Coherence rules** are registered with the registry by the package or product that owns the
+  settings. A rule needing a fact from outside the snapshot closes over whatever supplies it.
+  - A fatal problem refuses a write, and a stored configuration at boot.
+  - An advisory problem is a banner.
+  - The guard sits on the switch, not the pieces: credentials are saved freely in any order, and
+    turning the feature on is what's refused until they're there.
+
+**Storage and encryption:**
+- The set is reconciled into `app_setting` at boot. This is insert-only, so a default applies
+  once and an administrator's value outranks it on every later deploy.
+- Every value is encrypted with AES-256-GCM under the encryption key, secret or not, with a fresh
+  nonce per write. The store holds ciphertext only.
+- A sensitive value is never shown back, only whether it's set.
+
+**`settings.Live`** is the configuration in use: an immutable snapshot behind an atomic pointer.
+- **Loading at boot is fatal on any failure:** an unreadable store, an undecryptable row, or an
+  incoherent configuration.
+- **A refresh every three minutes** keeps the last good snapshot on failure, and rejects an
+  incoherent one whole.
+- **Bindings** rebuild a dependency, such as the mailer or the Google client, only when the
+  settings it reads change. A failed build keeps the previous one.
+- **`Set` is the write path:** parse, validate the transition, encrypt, store, install.
+- **Recovery from a lost key:** `Unreadable` reports the rows that won't decrypt, and
+  `ResetUnreadable` rewrites them at their defaults under the current key.
+
+**The `/admin/settings` handler** arrives with `rbac`, because it's guarded by a permission.
+
+**A flag is product, a setting is platform.** Anything that varies by account or tier is a flag
+or a quota, never a setting.
 
 ## 9. Errors, events and language
 
@@ -198,6 +235,8 @@ Package `ids`:
   product renders them in the reader's locale.
 - **Auth events** (sign-in, failed sign-in, password change, token issued) are rows in
   `auth_event`, which is append-only and logged.
+- **Operator alerts** (`alert`) are plain English to the deployment's operators, not users. The
+  product names itself in the subject line.
 - **Email** is the only rendered text.
   - Each email kind has a message id per part (subject, body blocks).
   - Templates are rendered in the recipient's `account_profile.locale`.
