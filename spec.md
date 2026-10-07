@@ -53,7 +53,7 @@ its own schedule.
 | `quotas` | `internal/quotas` | Limits by tier, inherited up the ladder, with per-account overrides that can expire (§13) | 1.4 |
 | `usage` | (new: Bloomprint's is analytics) | The quota day and the check against a limit. It decides, and the product counts (§13) | 1.4 |
 | `billing` | `internal/billing` | Tiers, prices, subscriptions and the stub provider | Furniture Magic 8.3 |
-| `email` | `internal/email` | Sending (Postmark, and a logging sender for development), kinds, the communication log, and i18n | 1.5 |
+| `email` | `internal/email` | Kinds by category, Postmark, the communication log, and rendering from message catalogues in the recipient's locale (§9) | 1.5 |
 | `shadowlog` | spike 0.1 | The boot checks. The `shadow()` helper, the log trigger and the exclusion registry are SQL in `migrations` (§4, §5) | 1.5 |
 | `db` | `internal/db` | Opening the pool, the transaction helper that sets the actor, the forward-only migration runner, and the table manifest and its grants (§3, §4) | 1.5 |
 | `migrations` | (new) | `plinth`'s migration stream and table manifest (§4) | 1.5 |
@@ -154,6 +154,8 @@ refused, because a down that drops a log table destroys audit history.
   - `reference`: reconciled or configured, never deleted
   - `link`: hard-deleted, and logged
   - `ephemeral`: hard-deleted, and not logged
+  - `record`: a record with its own retention (the communication log), hard-deleted when it
+    expires, and not logged, because the log would copy its personal data
   - `internal`: a version table, nobody's but the owner's
 - **its secret columns,** which no read-only or extract role reads and the log never keeps
 - **`NoExtract`,** which withholds its log twin from the extract role. Settings use it: their
@@ -288,11 +290,26 @@ or a quota, never a setting.
   `auth_event`, which is append-only and logged.
 - **Operator alerts** (`alert`) are plain English to the deployment's operators, not users. The
   product names itself in the subject line.
-- **Email** is the only rendered text.
-  - Each email kind has a message id per part (subject, body blocks).
-  - Templates are rendered in the recipient's `account_profile.locale`.
-  - A product supplies message catalogues for its own kinds, and may override `plinth`'s.
-  - English is en-GB.
+- **Email** is the only rendered text (`email`).
+  - **Kinds** are declared into a registry, each with a category: regulatory (kept six years),
+    operational and marketing (400 days), or internal (90 days). A kind may also be marked as
+    carrying a credential. `plinth` declares `password_reset`, `verify_address`,
+    `address_changed` and `operator_report`.
+  - **Message catalogues** are the flat JSON files (`<locale>.json`) a product's web app reads
+    too. `plinth` ships en-GB text for its kinds, and a product loads its own over them, so it
+    may override any. A kind renders from `email.<kind>.subject` and `email.<kind>.body`, whose
+    blank lines separate paragraphs, in the recipient's locale, falling back to en-GB.
+  - **HTML** escapes every parameter. A `link` parameter must be an absolute http or https URL,
+    and becomes a link.
+  - `Catalogue.Missing(locale)` lists what a translation lacks, for the build check.
+  - **`Logged` records every message** in `communication_log` before sending it, then how the
+    send ended. It withholds the body of a kind carrying a credential. Recording never stops a
+    send. A marketing kind must go on the broadcast stream, and nothing else may.
+  - **Postmark** is configured by the declared settings `email_provider_key`, `email_from` and
+    `email_broadcast_stream`. With either of the first two missing, the sender is `NoOp`, which
+    `Discards` reports so a product can log links instead. Header injection in an address or
+    subject is refused.
+  - **Pruning** goes one category at a time, never younger than 90 days.
 
 ## 10. Versioning
 

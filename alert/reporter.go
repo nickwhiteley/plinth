@@ -20,7 +20,7 @@ import (
 
 // Sink receives events that survived the budget.
 //
-// The mail sink arrives with package email. It's an interface so that the day email stops being enough, a Sentry-shaped
+// MailSink sends through package email. It's an interface so that the day email stops being enough, a Sentry-shaped
 // implementation is one file and no call sites.
 type Sink interface {
 	Deliver(ctx context.Context, subject, body string) error
