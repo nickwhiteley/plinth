@@ -483,3 +483,91 @@ func TestAGoogleOnlyIdentityHasNoPassword(t *testing.T) {
 		t.Errorf("Google after a reset: created %v, %v", created, err)
 	}
 }
+
+// A reset link is tied to the address it was sent to, like a verification link: move the address
+// and an outstanding reset link stops working (plinth#2 review).
+func TestMovingTheAddressKillsAnOutstandingResetLink(t *testing.T) {
+	ctx := context.Background()
+	l, _, _ := newLocal(t)
+	li := signup(t, l, "nick@example.com")
+	token, _, err := l.BeginReset(ctx, "nick@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.ChangeEmail(ctx, li.ID, pw, "elsewhere@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.CompleteReset(ctx, token, "an attacker's new password"); !errors.Is(err, identity.ErrInvalidCredentials) {
+		t.Errorf("a reset link sent to the old address = %v", err)
+	}
+	if _, err := l.Login(ctx, "elsewhere@example.com", pw); err != nil {
+		t.Errorf("the password changed: %v", err)
+	}
+}
+
+// failOnce fails the first UpdateIdentity after it is armed: a combine interrupted between
+// linking Google and removing the planted password.
+type failOnce struct {
+	*mem.Store
+	armed bool
+}
+
+func (f *failOnce) UpdateIdentity(ctx context.Context, li identity.LocalIdentity) error {
+	if f.armed {
+		f.armed = false
+		return errors.New("the database went away")
+	}
+	return f.Store.UpdateIdentity(ctx, li)
+}
+
+// An interrupted combine heals at the next Google sign-in: the planted password still goes, and
+// its sessions with it (plinth#2 review).
+func TestAnInterruptedCombineHeals(t *testing.T) {
+	ctx := context.Background()
+	st, a := &failOnce{Store: mem.New()}, &accounts{inactive: map[string]bool{}}
+	l := identity.NewLocal(st, a, identity.WithReducedHashCost())
+	planted, err := l.Signup(ctx, "sam@gmail.com", pw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.armed = true
+	if _, _, err := l.SignInWithGoogle(ctx, google()); err == nil {
+		t.Fatal("the interrupted combine reported success")
+	}
+	if half, _ := st.IdentityByID(ctx, planted.ID); half.GoogleSubject == "" || half.PasswordHash == "" {
+		t.Fatalf("the fixture isn't the half-written state: %+v", half)
+	}
+	if _, _, err := l.SignInWithGoogle(ctx, google()); err != nil {
+		t.Fatalf("the next sign-in: %v", err)
+	}
+	healed, _ := st.IdentityByID(ctx, planted.ID)
+	if healed.PasswordHash != "" || !healed.EmailVerified() || len(a.revoked) != 1 {
+		t.Errorf("not healed: %+v, revoked %v", healed, a.revoked)
+	}
+	if _, err := l.Login(ctx, "sam@gmail.com", pw); !errors.Is(err, identity.ErrInvalidCredentials) {
+		t.Errorf("the planted password still signs in: %v", err)
+	}
+}
+
+// The heal is precise: a linked identity that moved to a new, unverified address keeps its
+// password, because Google hasn't proved that address.
+func TestALinkedIdentityThatMovedKeepsItsPassword(t *testing.T) {
+	ctx := context.Background()
+	l, m, a := newLocal(t)
+	li, token := verifiable(t, l, "sam@gmail.com")
+	if _, err := l.CompleteVerification(ctx, token); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := l.SignInWithGoogle(ctx, google()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.ChangeEmail(ctx, li.ID, pw, "sam@work.example"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := l.SignInWithGoogle(ctx, google()); err != nil {
+		t.Fatal(err)
+	}
+	if after, _ := m.IdentityByID(ctx, li.ID); after.PasswordHash == "" || after.EmailVerified() || len(a.revoked) != 0 {
+		t.Errorf("a moved identity was stripped: %+v, revoked %v", after, a.revoked)
+	}
+}
