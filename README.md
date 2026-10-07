@@ -1,8 +1,8 @@
 # plinth
 
-The Go module Nick Whiteley's products share: identity and accounts, billing, feature flags,
-quotas and usage, encrypted settings, email with i18n, alerting, the Postgres shadow audit logs,
-and the data output API.
+The Go module Nick Whiteley's products share: identity and accounts, system roles and
+permissions, billing, feature flags, quotas and usage, encrypted settings, email with i18n,
+alerting, blob storage, the Postgres shadow audit logs, and the data output API.
 
 It's named for the base a piece of furniture stands on. Its first consumer is Furniture Magic,
 and its packages are lifted from Bloomprint with their tests. **`spec.md` is authoritative.**
@@ -20,6 +20,8 @@ and its packages are lifted from Bloomprint with their tests. **`spec.md` is aut
 | `email`, `shadowlog`, `db`, `storetest` | planned (1.5) |
 | `dataapi` | planned (1.6) |
 | `billing` | planned (Furniture Magic 8.3) |
+| `rbac`: system roles and permissions | planned (Furniture Magic 8.1) |
+| `blob`: object storage (Vercel Blob, S3 or another) | planned (Furniture Magic 6.3) |
 
 ## Using it
 

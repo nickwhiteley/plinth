@@ -1,8 +1,8 @@
 # plinth: specification
 
 `github.com/nickwhiteley/plinth` is the Go module Nick Whiteley's products share. It covers
-identity, accounts, billing, flags, quotas, usage, settings, email, alerting, the shadow audit
-logs and the data output API. It's named for the base a piece of furniture stands on: it's what
+identity, accounts, system roles and permissions, billing, flags, quotas, usage, settings, email,
+alerting, blob storage, the shadow audit logs and the data output API. It's named for the base a piece of furniture stands on: it's what
 products are built on, and none of it is any one product's business.
 
 **This file is authoritative,** and complete enough to rebuild the module. A product's own spec
@@ -57,13 +57,19 @@ its own schedule.
 | `code` | (new) | Error values: a stable code and string parameters (§9) | 1.1 |
 | `storetest` | `internal/store/storetest` | Per-schema test databases and the conformance-suite harness | 1.5 |
 | `dataapi` | the `data-api` repository | The extraction routes over the `(txid, log_id)` cursor | 1.6 |
+| `rbac` | Bloomprint's admin role, generalised | System permissions declared in code and reconciled at boot, roles as data, role grants to accounts, and the last-holder guard | Furniture Magic 8.1 |
+| `blob` | `internal/blob` | An object store behind one interface (get, put, conditional put, delete, list), with a local directory for development and Vercel Blob, plus the `blob_object` metadata table. S3 and others are further implementations. | Furniture Magic 6.3 |
 
 Bloomprint's `internal/auth` mixes identity (credentials) with accounts (who uses the product).
 `plinth` splits them, as Furniture Magic's spec §4 requires: an account refers to an identity by
 issuer and subject, so a second provider needs no change to accounts.
 
-**RBAC is open (§12).** Bloomprint's admin role and Furniture Magic's system roles are both
-generic, but the spec doesn't list them yet.
+**System roles and permissions are `plinth`'s** (decided 2026-10-07). Bloomprint's single
+administrator role becomes a role in `rbac` when Bloomprint moves onto `plinth` (§12).
+
+**Blob storage is behind an interface,** so a product chooses Vercel Blob, S3 or another store by
+configuration, not code. The provider's credentials are settings, never environment variables.
+Bloomprint's `NewVercelFromEnv` doesn't come across.
 
 ## 3. Storage
 
@@ -147,6 +153,8 @@ table, keyed one-to-one by `account_id`. It never adds a column to `account`.
 | `account_profile`: display name, time zone, locale, email | anything about the product's own objects |
 | `tier`, `feature_flag`, `account_flag`, `quota_key`, `tier_quota`, `account_quota`, usage | |
 | `app_setting`, the billing tables, the communication log | |
+| `system_permission`, `system_role`, `system_role_permission`, `account_system_role` | the permission codes it declares, and project-level roles |
+| `blob_object` | which objects it stores, and who may read them |
 
 **This moves columns in Furniture Magic's draft schema.** Its `account` has `units`,
 `metric_precision_um`, `imperial_denominator`, `notify_comments` and `notify_signoffs`. They move
@@ -208,12 +216,17 @@ mechanism. The product registers its own personal columns with it.
 - **Test first:** a lifted package arrives with its Bloomprint tests passing, and changes are
   driven by a failing test.
 
-## 12. Open questions
+## 12. Bloomprint's move onto `plinth`
 
-1. **RBAC.** Should system roles and permissions (Furniture Magic data-model §4.1, task 8.1) be a
-   `plinth` package? Bloomprint has a simpler admin role. Both are generic. The proposal is yes,
-   as `rbac`, when Furniture Magic reaches 8.1.
-2. **Billing scope.** Furniture Magic ships Bloomprint's stub provider in v1. The tables arrive
-   with the package, so their exact shape is decided when it's lifted.
-3. **Blob storage.** Bloomprint's `blob` package (Vercel Blob, with `blob_object` metadata) is
-   generic too. It isn't listed in Furniture Magic's §16, but the product needs it from 6.3.
+Bloomprint changes only when it adopts `plinth`. It will then need these changes:
+- **Accounts:** its `User` splits into an identity and an account (§2, §6).
+- **Roles:** its administrator role becomes an `rbac` role, with its powers as declared
+  permissions, and the last-holder guard replaces its own check.
+- **Storage:** its single `store` package gives way to each package's own store (§3).
+- **Blob storage:** its Vercel Blob credentials move from the environment to settings.
+
+## 13. Open questions
+
+1. **Billing tables.** These are reviewed once the difference between what Bloomprint and
+   Furniture Magic need from billing is known. Until then, `billing` is lifted as Bloomprint has
+   it.

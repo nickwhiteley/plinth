@@ -29,6 +29,7 @@ Postgres.
   product's app schema, audited into its log schema, under the product's
   segregated roles (owner, migrate, runtime, extract, read-only)
 - Postmark (email), Google OAuth sign-in, the billing provider
+- An object store behind the `blob` interface (Vercel Blob, S3 or another)
 - A reporting warehouse reading `_log` tables and `<app>_extract` views through
   the data API under a published data contract
 
