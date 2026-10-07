@@ -134,6 +134,9 @@ func Grant(ctx context.Context, tx pgx.Tx, roles Roles, tables []Table) error {
 		}
 		if roles.App != "" {
 			privs := "SELECT, INSERT, UPDATE"
+			if t.Class == AppendOnly {
+				privs = "SELECT, INSERT" // never rewritten
+			}
 			if t.Deletable() {
 				privs += ", DELETE"
 			}

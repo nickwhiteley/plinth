@@ -166,8 +166,9 @@ refused, because a down that drops a log table destroys audit history.
 
 **`db.Grant(roles, tables)`** applies the manifest, `plinth`'s and the product's together, as the
 owner on every deploy:
-- The runtime role gets `SELECT, INSERT, UPDATE` on every non-internal table, `DELETE` only on
-  link and ephemeral ones, and `SELECT` on the log.
+- The runtime role gets `SELECT, INSERT, UPDATE` on every non-internal table (only `SELECT,
+  INSERT` on an append-only one), `DELETE` only on link, ephemeral and record ones, and `SELECT`
+  on the log.
 - The extract role gets the log only.
 - The read-only role gets a column allowlist without secrets, and the log.
 
