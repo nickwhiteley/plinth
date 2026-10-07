@@ -19,9 +19,31 @@ import (
 // requirements.
 const MinPasswordLength = 8
 
-// ErrInvalidHash is returned when a stored hash cannot be parsed, which means
-// the record is corrupt rather than the password wrong.
+// ErrInvalidHash is returned when a stored hash cannot be parsed, or names
+// parameters outside what this package mints and accepts, which means the
+// record is corrupt rather than the password wrong.
 var ErrInvalidHash = code.New("identity.invalid_hash")
+
+// ErrHashUnavailable is returned when no salt could be read from the system's
+// entropy source. crypto/rand practically never fails, but every error this
+// package returns is a code.
+var ErrHashUnavailable = code.New("identity.hash_unavailable")
+
+// randRead is crypto/rand.Read, replaceable so a test can make it fail.
+var randRead = rand.Read
+
+// Bounds on a stored hash's parameters. Minted hashes are well inside them;
+// anything outside is corruption, refused before it reaches argon2.IDKey, which
+// panics on t < 1, p < 1, m < 8p or a zero key length, and allocates whatever m
+// says (plinth#2 review).
+const (
+	maxIterations = 100
+	maxMemoryKiB  = 1 << 20 // 1 GiB
+	minSaltLen    = 8
+	maxSaltLen    = 64
+	minKeyLen     = 16
+	maxKeyLen     = 64
+)
 
 // errWeak is ErrWeakPassword with the minimum, which a message needs.
 var errWeak = ErrWeakPassword.With("min", strconv.Itoa(MinPasswordLength))
@@ -124,8 +146,8 @@ func hashPasswordWith(p argon2Params, password string) (string, error) {
 	defer hashes.leave()
 
 	salt := make([]byte, p.saltLen)
-	if _, err := rand.Read(salt); err != nil {
-		return "", fmt.Errorf("generating salt: %w", err)
+	if _, err := randRead(salt); err != nil {
+		return "", ErrHashUnavailable
 	}
 
 	key := argon2.IDKey([]byte(password), salt, p.iterations, p.memoryKiB, p.parallelism, p.keyLen)
@@ -143,11 +165,15 @@ func VerifyPassword(password, encoded string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	// Around the derivation only: decodeHash is cheap and must not hold a slot.
+	return subtle.ConstantTimeCompare(derive(password, salt, p), want) == 1, nil
+}
+
+// derive holds a gate slot around the derivation only (decodeHash is cheap and
+// must not hold one), and releases it however IDKey returns.
+func derive(password string, salt []byte, p argon2Params) []byte {
 	hashes.enter()
-	got := argon2.IDKey([]byte(password), salt, p.iterations, p.memoryKiB, p.parallelism, p.keyLen)
-	hashes.leave()
-	return subtle.ConstantTimeCompare(got, want) == 1, nil
+	defer hashes.leave()
+	return argon2.IDKey([]byte(password), salt, p.iterations, p.memoryKiB, p.parallelism, p.keyLen)
 }
 
 func decodeHash(encoded string) (argon2Params, []byte, []byte, error) {
@@ -157,25 +183,40 @@ func decodeHash(encoded string) (argon2Params, []byte, []byte, error) {
 		return argon2Params{}, nil, nil, ErrInvalidHash
 	}
 
-	var version int
-	if _, err := fmt.Sscanf(parts[2], "v=%d", &version); err != nil {
+	if parts[2] != "v="+strconv.Itoa(argon2.Version) {
 		return argon2Params{}, nil, nil, ErrInvalidHash
-	}
-	if version != argon2.Version {
-		return argon2Params{}, nil, nil, ErrInvalidHash.With("version", strconv.Itoa(version))
 	}
 
-	var p argon2Params
-	if _, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &p.memoryKiB, &p.iterations, &p.parallelism); err != nil {
+	// Strictly three parameters, in order, each a bounded decimal: Sscanf would
+	// accept trailing junk and wrap out-of-range values.
+	fields := strings.Split(parts[3], ",")
+	if len(fields) != 3 {
 		return argon2Params{}, nil, nil, ErrInvalidHash
 	}
+	var vals [3]uint64
+	for i, prefix := range []string{"m=", "t=", "p="} {
+		v, ok := strings.CutPrefix(fields[i], prefix)
+		if !ok {
+			return argon2Params{}, nil, nil, ErrInvalidHash
+		}
+		n, err := strconv.ParseUint(v, 10, 32)
+		if err != nil {
+			return argon2Params{}, nil, nil, ErrInvalidHash
+		}
+		vals[i] = n
+	}
+	m, t, par := vals[0], vals[1], vals[2]
+	if t < 1 || t > maxIterations || par < 1 || par > 255 || m < 8*par || m > maxMemoryKiB {
+		return argon2Params{}, nil, nil, ErrInvalidHash
+	}
+	p := argon2Params{memoryKiB: uint32(m), iterations: uint32(t), parallelism: uint8(par)}
 
 	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
-	if err != nil {
+	if err != nil || len(salt) < minSaltLen || len(salt) > maxSaltLen {
 		return argon2Params{}, nil, nil, ErrInvalidHash
 	}
 	key, err := base64.RawStdEncoding.DecodeString(parts[5])
-	if err != nil {
+	if err != nil || len(key) < minKeyLen || len(key) > maxKeyLen {
 		return argon2Params{}, nil, nil, ErrInvalidHash
 	}
 
