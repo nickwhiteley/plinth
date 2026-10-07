@@ -173,6 +173,8 @@ func EnsureRoles(t testing.TB, d *DB, tables []db.Table) {
 		`ALTER ROLE plinth_t_extract LOGIN PASSWORD '` + rolePassword + `'`,
 		`ALTER ROLE plinth_t_readonly LOGIN PASSWORD '` + rolePassword + `'`,
 		`ALTER ROLE plinth_t_migrate LOGIN PASSWORD '` + rolePassword + `'`,
+		// A product's setup revokes CONNECT from PUBLIC, so grant it to the test logins.
+		`DO $$ BEGIN EXECUTE format('GRANT CONNECT ON DATABASE %I TO plinth_t_app, plinth_t_extract, plinth_t_readonly, plinth_t_migrate', current_database()); END $$`,
 	} {
 		if _, err := c.Exec(ctx, q); err != nil {
 			t.Fatal(err)
