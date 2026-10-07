@@ -152,6 +152,9 @@ refused, because a down that drops a log table destroys audit history.
 - **its class:**
   - `entity`: soft-deleted
   - `reference`: reconciled or configured, never deleted
+  - `append_only`: only ever gains rows (a save, an id ever issued), logged, never deleted
+  - `counter`: a hot row updated in place whose history is kept elsewhere (a head's revision),
+    not logged and never deleted
   - `link`: hard-deleted, and logged
   - `ephemeral`: hard-deleted, and not logged
   - `record`: a record with its own retention (the communication log), hard-deleted when it

@@ -16,6 +16,12 @@ const (
 	Entity Class = "entity"
 	// Reference tables are reconciled from code or configured by administrators, never deleted.
 	Reference Class = "reference"
+	// AppendOnly tables only ever gain rows (a save, an identity ever issued): logged, never
+	// deleted or rewritten by the application.
+	AppendOnly Class = "append_only"
+	// Counter tables are hot rows updated in place (a head's revision), whose history is kept
+	// elsewhere: not logged, and never deleted.
+	Counter Class = "counter"
 	// Link tables are hard-deleted; the log's D row (the old row) is the history.
 	Link Class = "link"
 	// Ephemeral tables (sessions, tokens) are hard-deleted and not logged.
@@ -43,7 +49,9 @@ type Table struct {
 func (t Table) Deletable() bool { return t.Class == Link || t.Class == Ephemeral || t.Class == Record }
 
 // Logged reports whether the table has a shadow log twin.
-func (t Table) Logged() bool { return t.Class != Ephemeral && t.Class != Internal && t.Class != Record }
+func (t Table) Logged() bool {
+	return t.Class != Ephemeral && t.Class != Internal && t.Class != Record && t.Class != Counter
+}
 
 // Roles are the product's database roles. plinth never names them.
 type Roles struct {
