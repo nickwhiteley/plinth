@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -31,6 +32,24 @@ func setup(t *testing.T) (*dataapi.Extractor, *pgtest.DB) {
 	}
 	t.Cleanup(pool.Close)
 	return dataapi.New(pool, d.Schema), d
+}
+
+// window reads a page, waiting until at least want rows are extractable. pg_snapshot_xmin is
+// cluster-wide, so another package's transaction, open while the tests run in parallel, holds back
+// what may be extracted: that's the guarantee working, so the tests wait for it rather than flake.
+func window(t *testing.T, e *dataapi.Extractor, table string, after dataapi.Cursor, limit, want int) dataapi.Page {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		p, err := e.Window(ctx, table, after, limit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(p.Rows) >= want || time.Now().After(deadline) {
+			return p
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 func tier(t *testing.T, d *pgtest.DB, key string, order int) {
@@ -65,10 +84,7 @@ func TestWindowPagesInOrder(t *testing.T) {
 	for i, k := range []string{"free", "plus", "pro"} {
 		tier(t, d, k, i+1)
 	}
-	p, err := e.Window(ctx, "tier", dataapi.Cursor{}, 2)
-	if err != nil {
-		t.Fatal(err)
-	}
+	p := window(t, e, "tier", dataapi.Cursor{}, 2, 2)
 	if len(p.Rows) != 2 || !p.More {
 		t.Fatalf("first page: %d rows, more %v", len(p.Rows), p.More)
 	}
@@ -76,9 +92,9 @@ func TestWindowPagesInOrder(t *testing.T) {
 	if err := json.Unmarshal(p.Rows[0], &row); err != nil || row["key"] != "free" || row["op"] != "I" || row["sort_order"] != float64(1) {
 		t.Errorf("a row: %s", p.Rows[0])
 	}
-	p2, err := e.Window(ctx, "tier", p.Next, 2)
-	if err != nil || len(p2.Rows) != 1 || p2.More {
-		t.Fatalf("second page: %d rows, more %v, %v", len(p2.Rows), p2.More, err)
+	p2 := window(t, e, "tier", p.Next, 2, 1)
+	if len(p2.Rows) != 1 || p2.More {
+		t.Fatalf("second page: %d rows, more %v", len(p2.Rows), p2.More)
 	}
 	_ = json.Unmarshal(p2.Rows[0], &row)
 	if row["key"] != "pro" {
@@ -131,7 +147,7 @@ func TestALongTransactionIsNeverSkipped(t *testing.T) {
 	if err := long.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
-	after, _ := e.Window(ctx, "tier", early.Next, 100)
+	after := window(t, e, "tier", early.Next, 100, 2)
 	var keys []string
 	for _, r := range after.Rows {
 		var row map[string]any
@@ -148,8 +164,8 @@ func TestAckIsForwardOnlyAndResetForgets(t *testing.T) {
 	for i, k := range []string{"free", "plus"} {
 		tier(t, d, k, i+1)
 	}
-	p1, _ := e.Window(ctx, "tier", dataapi.Cursor{}, 1)
-	p2, _ := e.Window(ctx, "tier", p1.Next, 1)
+	p1 := window(t, e, "tier", dataapi.Cursor{}, 1, 1)
+	p2 := window(t, e, "tier", p1.Next, 1, 1)
 	if err := e.Ack(ctx, "tier", p2.Next, 2); err != nil {
 		t.Fatalf("Ack: %v", err)
 	}
@@ -201,6 +217,7 @@ func TestHandler(t *testing.T) {
 	if status, body := get("/data/extract"); status != 200 || len(body["tables"].([]any)) == 0 {
 		t.Errorf("list: %d %v", status, body)
 	}
+	window(t, e, "tier", dataapi.Cursor{}, 10, 1) // until the row is extractable
 	status, page := get("/data/extract/tier?limit=10")
 	if status != 200 || len(page["rows"].([]any)) != 1 {
 		t.Fatalf("page: %d %v", status, page)
