@@ -1,0 +1,26 @@
+# What `make lint` and `make test` do locally, run on every push and pull request.
+# A Postgres job joins when the first store lands (spec.md §11, `make test-db`).
+name: CI
+
+on:
+  push:
+    branches: [main, "feat/**", "fix/**", "docs/**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  go:
+    name: Go
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Lint
+        run: make lint
+      - name: Test
+        run: make test

@@ -1,0 +1,55 @@
+# Automated review of every pull request into main, by nickwhiteley/pr-reviewer.
+#
+# What it reviews and how hard is configured in PR-REVIEW.md at the repository
+# root, not here: the agents, the deterministic hygiene checks, and the context
+# the agents are given about what this repository is. A non-zero exit fails the
+# check, which happens when a verified finding is critical or high severity.
+name: PR Quality Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    # Only PRs into main; PRs between feature branches are not reviewed.
+    branches: [main]
+
+permissions:
+  contents: read
+  # The review is posted as a comment per agent, plus inline comments on the
+  # lines findings map to, so write on pull-requests is required.
+  pull-requests: write
+
+jobs:
+  review:
+    name: Automated PR review
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Full history: the tool diffs base against head itself.
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install pr-reviewer
+        run: go install github.com/nickwhiteley/pr-reviewer/cmd/review@latest
+
+      - name: Run PR review
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+        run: |
+          # --review-timeout defaults to 600s, well inside the 30 minutes this
+          # job is allowed. A diff this size needs more than that, and a review
+          # that runs out of time fails closed — so the default was marking the
+          # check red without any of the code having been looked at.
+          review \
+            --pr ${{ github.event.pull_request.number }} \
+            --repo ${{ github.repository }} \
+            --base ${{ github.event.pull_request.base.sha }} \
+            --head ${{ github.event.pull_request.head.sha }} \
+            --review-timeout 1500
