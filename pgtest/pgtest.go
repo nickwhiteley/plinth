@@ -191,6 +191,11 @@ func EnsureRoles(t testing.TB, d *DB, tables []db.Table) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// As a product's one-time setup does (ALTER DEFAULT PRIVILEGES … REVOKE EXECUTE … FROM PUBLIC),
+	// so a function a constraint calls must be granted, here as in a deployment.
+	if _, err := tx.Exec(ctx, `REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA `+pgx.Identifier{d.Schema}.Sanitize()+`, `+pgx.Identifier{d.Schema + "_log"}.Sanitize()+` FROM PUBLIC`); err != nil {
+		t.Fatal(err)
+	}
 	if err := db.Grant(ctx, tx, Roles, tables); err != nil {
 		t.Fatal(err)
 	}

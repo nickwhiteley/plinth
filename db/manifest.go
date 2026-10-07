@@ -67,6 +67,10 @@ type Roles struct {
 	Readonly string
 }
 
+// ConstraintFunctions are the functions plinth's CHECK constraints call, which the runtime role
+// must be able to execute.
+var ConstraintFunctions = []string{"valid_time_zone(text)"}
+
 // Grant gives each role exactly what the manifest says, in the current schema and its log schema.
 // Run it as the owner on every deploy: it isn't a migration, because which roles exist is
 // deployment configuration, and re-running is what keeps "every table" true.
@@ -91,6 +95,14 @@ func Grant(ctx context.Context, tx pgx.Tx, roles Roles, tables []Table) error {
 		}
 		if err := exec("GRANT SELECT ON ALL TABLES IN SCHEMA " + logs + " TO " + id(roles.App)); err != nil {
 			return err
+		}
+		// The functions plinth's constraints call. A product's setup revokes EXECUTE from PUBLIC,
+		// and a CHECK runs with the writer's privileges, so without this the runtime role could
+		// write no account at all.
+		for _, fn := range ConstraintFunctions {
+			if err := exec("GRANT EXECUTE ON FUNCTION " + app + "." + fn + " TO " + id(roles.App)); err != nil {
+				return err
+			}
 		}
 	}
 	if roles.Extract != "" {

@@ -63,6 +63,7 @@ func TestRoleSeparation(t *testing.T) {
 
 	as(t, d, roles.App, func(c *pgx.Conn) {
 		allowed(t, c, "the app reads and writes an account", `UPDATE account SET last_signed_in_at = now() WHERE id = $1`, acct)
+		allowed(t, c, "the app sets a time zone, which a constraint checks with valid_time_zone", `UPDATE account_profile SET time_zone = 'Europe/Paris' WHERE account_id = $1`, acct)
 		allowed(t, c, "the app reads the log", `SELECT count(*) FROM `+logs+`.account_log`)
 		allowed(t, c, "the app deletes a session", `DELETE FROM session WHERE account_id = $1`, acct)
 		denied(t, c, "the app deletes an entity", `DELETE FROM account WHERE id = $1`, acct)
