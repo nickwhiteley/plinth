@@ -159,6 +159,8 @@ refused, because a down that drops a log table destroys audit history.
   - `ephemeral`: hard-deleted, and not logged
   - `record`: a record with its own retention (the communication log), hard-deleted when it
     expires, and not logged, because the log would copy its personal data
+  - `journal`: a history the product writes itself (a command log): appended to, never
+    rewritten or deleted, and not logged, because it is already the record
   - `internal`: a version table, nobody's but the owner's
 - **its secret columns,** which no read-only or extract role reads and the log never keeps
 - **`NoExtract`,** which withholds its log twin from the extract role. Settings use it: their
@@ -167,7 +169,7 @@ refused, because a down that drops a log table destroys audit history.
 **`db.Grant(roles, tables)`** applies the manifest, `plinth`'s and the product's together, as the
 owner on every deploy:
 - The runtime role gets `SELECT, INSERT, UPDATE` on every non-internal table (only `SELECT,
-  INSERT` on an append-only one), `DELETE` only on link, ephemeral and record ones, and `SELECT`
+  INSERT` on an append-only or journal one), `DELETE` only on link, ephemeral and record ones, and `SELECT`
   on the log.
 - The extract role gets the log only.
 - The read-only role gets a column allowlist without secrets, and the log.

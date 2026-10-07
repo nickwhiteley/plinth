@@ -30,6 +30,10 @@ const (
 	// hard-deleted when they expire, and not shadow-logged, because the log would copy the
 	// personal data they hold and erasure would have to scrub it twice.
 	Record Class = "record"
+	// Journal tables are a history the product writes itself (a command log): appended to and
+	// never rewritten or deleted, like append-only ones, but not shadow-logged, because they are
+	// already the record. The warehouse reads them through an extract view.
+	Journal Class = "journal"
 	// Internal tables (a migration version table) are no role's business but the owner's.
 	Internal Class = "internal"
 )
@@ -50,7 +54,7 @@ func (t Table) Deletable() bool { return t.Class == Link || t.Class == Ephemeral
 
 // Logged reports whether the table has a shadow log twin.
 func (t Table) Logged() bool {
-	return t.Class != Ephemeral && t.Class != Internal && t.Class != Record && t.Class != Counter
+	return t.Class != Ephemeral && t.Class != Internal && t.Class != Record && t.Class != Counter && t.Class != Journal
 }
 
 // Roles are the product's database roles. plinth never names them.
@@ -134,7 +138,7 @@ func Grant(ctx context.Context, tx pgx.Tx, roles Roles, tables []Table) error {
 		}
 		if roles.App != "" {
 			privs := "SELECT, INSERT, UPDATE"
-			if t.Class == AppendOnly {
+			if t.Class == AppendOnly || t.Class == Journal {
 				privs = "SELECT, INSERT" // never rewritten
 			}
 			if t.Deletable() {
