@@ -18,7 +18,7 @@ and its packages are lifted from Bloomprint with their tests. **`spec.md` is aut
 | `identity`: the local provider (passwords, reset and verification links, Google sign-in) | built, with in-memory and Postgres stores |
 | `account`: accounts, profiles and sessions | built, with in-memory and Postgres stores |
 | `env`: the `.env` loader, for declared names only | built |
-| `settings`: declared, encrypted settings, the live snapshot and its write path | built, with in-memory and Postgres stores; the admin handler is planned (`rbac`) |
+| `settings`: declared, encrypted settings, the live snapshot and its write path | built, with in-memory and Postgres stores; the admin handler is the product's |
 | `alert`: errors from the log, rationed, redacted and mailed | built |
 | `actor`: who is acting, for attribution | built |
 | `flags`: tiers and feature flags | built, with in-memory and Postgres stores |
@@ -30,8 +30,8 @@ and its packages are lifted from Bloomprint with their tests. **`spec.md` is aut
 | `pgtest`, `fixture`: Postgres test schemas and fixtures | built |
 | `email`: kinds, Postmark, the communication log, and rendering in the recipient's locale | built, with in-memory and Postgres stores |
 | `dataapi`: extraction of the shadow logs by `(txid, log_id)` cursor, and its handler | built |
-| `billing` | planned (Furniture Magic 8.3) |
-| `rbac`: system roles and permissions | planned (Furniture Magic 8.1) |
+| `billing`: prices, checkouts and subscriptions, the provider port and a stub provider | built, with in-memory and Postgres stores. No proration, pause or dunning yet |
+| `rbac`: system roles and permissions, with the last-holder guard | built, with in-memory and Postgres stores |
 | `blob`: object storage (Vercel Blob, a local directory, memory; S3 or another is planned) | done |
 
 ## Using it

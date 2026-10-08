@@ -25,5 +25,9 @@ var Tables = []db.Table{
 	{Name: "system_role", Class: db.Entity},
 	{Name: "system_role_permission", Class: db.Link},
 	{Name: "account_system_role", Class: db.Link},
+	{Name: "billing_price", Class: db.Reference},
+	{Name: "billing_customer", Class: db.Entity},
+	{Name: "billing_checkout", Class: db.Entity},
+	{Name: "billing_subscription", Class: db.Entity},
 	{Name: "communication_log", Class: db.Record, Secrets: []string{"recipient", "subject", "body"}},
 }
