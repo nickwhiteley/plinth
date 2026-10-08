@@ -21,5 +21,9 @@ var Tables = []db.Table{
 	{Name: "quota_key", Class: db.Reference},
 	{Name: "tier_quota", Class: db.Link},
 	{Name: "account_quota", Class: db.Link},
+	{Name: "system_permission", Class: db.Reference},
+	{Name: "system_role", Class: db.Entity},
+	{Name: "system_role_permission", Class: db.Link},
+	{Name: "account_system_role", Class: db.Link},
 	{Name: "communication_log", Class: db.Record, Secrets: []string{"recipient", "subject", "body"}},
 }
