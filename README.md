@@ -32,7 +32,7 @@ and its packages are lifted from Bloomprint with their tests. **`spec.md` is aut
 | `dataapi`: extraction of the shadow logs by `(txid, log_id)` cursor, and its handler | built |
 | `billing` | planned (Furniture Magic 8.3) |
 | `rbac`: system roles and permissions | planned (Furniture Magic 8.1) |
-| `blob`: object storage (Vercel Blob, S3 or another) | planned (Furniture Magic 6.3) |
+| `blob`: object storage (Vercel Blob, a local directory, memory; S3 or another is planned) | done |
 
 ## Using it
 

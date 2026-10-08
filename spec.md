@@ -61,7 +61,7 @@ its own schedule.
 | `pgtest`, `fixture` | `internal/store/storetest` | Per-schema test databases, and the rows a conformance suite needs from other packages (§11) | 1.5 |
 | `dataapi` | the `data-api` repository, rebuilt | Extraction of the shadow logs by `(txid, log_id)` cursor, as the extract role, and its HTTP handler (§14) | 1.6 |
 | `rbac` | Bloomprint's admin role, generalised | System permissions declared in code and reconciled at boot, roles as data, role grants to accounts, and the last-holder guard | Furniture Magic 8.1 |
-| `blob` | `internal/blob` | An object store behind one interface (get, put, conditional put, delete, list), with a local directory for development and Vercel Blob, plus the `blob_object` metadata table. S3 and others are further implementations. | Furniture Magic 6.3 |
+| `blob` | `blob` | An object store behind one interface (get, put, conditional put, delete, list), with Vercel Blob, a local directory for development, and an in-memory store for tests, held to one conformance suite. S3 and others are further implementations. The `blob_object` metadata table is the product's, because the content types it admits are product data (decided 2026-10-08). Bloomprint's Postgres bucket is not lifted: it was a workaround for a suspended store. | Furniture Magic 6.3 |
 
 Bloomprint's `internal/auth` mixes identity (credentials) with accounts (who uses the product).
 `plinth` splits them, as Furniture Magic's spec §4 requires: an account refers to an identity by
@@ -221,7 +221,7 @@ table, keyed one-to-one by `account_id`. It never adds a column to `account`.
 | `tier`, `feature_flag`, `account_flag`, `quota_key`, `tier_quota`, `account_quota`, usage | |
 | `app_setting`, the billing tables, the communication log | |
 | `system_permission`, `system_role`, `system_role_permission`, `account_system_role` | the permission codes it declares, and project-level roles |
-| `blob_object` | which objects it stores, and who may read them |
+| | `blob_object`, which objects it stores and who may read them |
 
 **This moves columns in Furniture Magic's draft schema.** Its `account` has `units`,
 `metric_precision_um`, `imperial_denominator`, `notify_comments` and `notify_signoffs`. They move
