@@ -52,7 +52,7 @@ its own schedule.
 | `flags` | `internal/flags` | Tiers, and feature flags by tier with per-account overrides (§13) | 1.4 |
 | `quotas` | `internal/quotas` | Limits by tier, inherited up the ladder, with per-account overrides that can expire (§13) | 1.4 |
 | `usage` | (new: Bloomprint's is analytics) | The quota day and the check against a limit. It decides, and the product counts (§13) | 1.4 |
-| `billing` | `internal/billing` | Tiers, prices, subscriptions and the stub provider | Furniture Magic 8.3 |
+| `billing` | `internal/billing` | Prices, checkouts and subscriptions, the provider port and the stub provider (§13b) | Furniture Magic 8.3 |
 | `email` | `internal/email` | Kinds by category, Postmark, the communication log, and rendering from message catalogues in the recipient's locale (§9) | 1.5 |
 | `shadowlog` | spike 0.1 | The boot checks. The `shadow()` helper, the log trigger and the exclusion registry are SQL in `migrations` (§4, §5) | 1.5 |
 | `db` | `internal/db` | Opening the pool, the transaction helper that sets the actor, the forward-only migration runner, and the table manifest and its grants (§3, §4) | 1.5 |
@@ -60,7 +60,7 @@ its own schedule.
 | `code` | (new) | Error values: a stable code and string parameters (§9) | 1.1 |
 | `pgtest`, `fixture` | `internal/store/storetest` | Per-schema test databases, and the rows a conformance suite needs from other packages (§11) | 1.5 |
 | `dataapi` | the `data-api` repository, rebuilt | Extraction of the shadow logs by `(txid, log_id)` cursor, as the extract role, and its HTTP handler (§14) | 1.6 |
-| `rbac` | Bloomprint's admin role, generalised | System permissions declared in code and reconciled at boot, roles as data, role grants to accounts, and the last-holder guard | Furniture Magic 8.1 |
+| `rbac` | Bloomprint's admin role, generalised | System permissions declared in code and reconciled at boot, roles as data, role grants to accounts, and the last-holder guard (§13a) | Furniture Magic 8.1 |
 | `blob` | `blob` | An object store behind one interface (get, put, conditional put, delete, list), with Vercel Blob, a local directory for development, and an in-memory store for tests, held to one conformance suite. S3 and others are further implementations. The `blob_object` metadata table is the product's, because the content types it admits are product data (decided 2026-10-08). Bloomprint's Postgres bucket is not lifted: it was a workaround for a suspended store. | Furniture Magic 6.3 |
 
 Bloomprint's `internal/auth` mixes identity (credentials) with accounts (who uses the product).
@@ -507,6 +507,55 @@ overrides, and quotas per tier.
 - **`Warning(0.8)`** is the 80% bar.
 - **Reservation** (Furniture Magic's assistant turns: an advisory lock, then a sum including
   running turns' reservations) is the product's transaction, built on these.
+
+## 13a. System roles: `rbac`
+
+**Permissions are declared in code** (`Registry.Declare`) and reconciled into `system_permission`;
+one no longer declared is retired, never deleted, and grants nothing. plinth declares two itself,
+`roles.assign` and `roles.manage`; a product declares the rest.
+
+**Roles are data** (`system_role`, soft-deleted). A product seeds some (`Registry.Seed`), which
+become system roles: their key is fixed and they can't be deleted, though an administrator can
+rename them and change what they carry. A seed with `All` always carries every declared
+permission, so a new permission reaches the administrator without a migration. **An account holds
+any number of roles** (`account_system_role`), and its rights are their union.
+
+**Two rules:**
+1. *Nobody gives what they don't hold.* `Assign` needs `roles.assign` and every permission the
+   role carries; `CreateRole` and `UpdateRole` need `roles.manage` and every permission put in (taking
+   one out needs no more). This is the service's, because it needs the actor.
+2. *The last holder of `roles.assign` can't be removed.* This is the database's, so it holds on every
+   path: deferred constraint triggers on `account_system_role`, `system_role_permission`,
+   `system_role` and `account` check, at commit, that someone active still holds it, after taking a
+   lock on the permission's row. A change to a row nobody's rights rested on is not examined, so
+   nothing is blocked before the first administrator exists. The in-memory store applies the same
+   rule. It returns `rbac.last_holder`.
+
+**The first administrator** is `Service.Bootstrap`, with no actor, run with deploy credentials. The
+grant's `granted_by` is null, which is how it is recognised in the log.
+
+## 13b. Billing
+
+Lifted from Bloomprint, and smaller. **A checkout is an attempt; a subscription is a relationship.**
+The provider is the authority on a subscription's state and on what is charged: `billing` imports no
+provider, so a decision can't reach one, and the shell (`billing/service`) fetches, decides and
+writes.
+- **Prices** (`billing_price`) per tier, interval (month or year) and provider; the amount and
+  currency are the provider's plan's. A price can be switched off without moving anyone off its tier.
+- **`Start`** makes the provider's customer once, begins a subscription there, and records a
+  checkout with the amount copied. The customer enters their card only on the provider's hosted
+  page.
+- **`Reconcile`** is the one way state comes in. A redirect back, a webhook and the sweep are only
+  reasons to call it. It copies the provider's state, ends a subscription the provider has
+  expired, and moves the account's tier: its own while *entitled* (active; past due within seven
+  days of its period's end; cancelled with the paid period still running), else the lowest enabled
+  tier. A checkout the customer abandoned leaves the account alone.
+- **`Cancel`** asks the provider to end the subscription at the period's end and records the wish;
+  the tier stays until then.
+- **`provider/stub`** takes no money. A subscription is pending until `Complete` is called, as a
+  development page or a test does.
+- **Not yet:** proration of an upgrade, pause, dunning and reminders, and a vendor adapter. They are
+  additions to the subscription's intent fields and a second `Provider`, not changes to either.
 
 ## 14. The data API
 
