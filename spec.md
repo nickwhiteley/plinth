@@ -396,6 +396,10 @@ unchanged, and so do its tests.
 - **Sessions** last 30 days and slide. Only the token's hash is stored. The expiry is set back to
   a full 30 days once a day or more has passed since it was last set, so a session in use keeps
   sliding, and `last_seen_at` is touched at most once a minute.
+- **Sessions are durable.** The `session` table is logged at the storage level (migration 0009),
+  though it is still hard-deleted and not shadow-logged. It was unlogged at first, and managed
+  Postgres that suspends an idle database came back with it empty, signing everyone out after a
+  short break.
 - **`Authenticate(token)`** returns the account, and refuses an unknown, expired or inactive
   one.
 - **`Deactivate`** ends every session. **`Reactivate`** lets the account sign in again.
