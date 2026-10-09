@@ -45,6 +45,23 @@ go env -w GOPRIVATE=github.com/nickwhiteley/*
 go get github.com/nickwhiteley/plinth@<version>
 ```
 
+## Checking migrations at boot
+
+`db.Pending` tells a product's server, running as its runtime role, whether every migration has
+been applied. It reads only, applies nothing, takes no lock and needs no owner login:
+
+```go
+st, err := db.Pending(ctx, pool, migrations.Plinth, productStream)
+if err != nil { /* the check itself failed, e.g. no SELECT on a version table */ }
+if !st.OK() { log.Error("migrations", "pending", st.Pending(), "err", st.Err()) }
+```
+
+`Status.Streams` reports, per stream, what is `Pending`, `Unknown` (the code is older than the
+database), `Changed` (a checksum differs) and `Missing` (no version table at all). `Err()` wraps
+them in `db.migration_pending`, `db.migration_unknown`, `db.migration_changed` and
+`db.migration_table_missing`. It relies on `db.Grant`, which now gives the runtime role `SELECT`
+(only) on the manifest's `internal` tables, so re-run `Grant` after upgrading. See `spec.md` §4.
+
 ## Developing
 
 Prerequisites: Go 1.26+, and Docker for the Postgres tests.

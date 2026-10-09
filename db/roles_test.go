@@ -74,7 +74,8 @@ func TestRoleSeparation(t *testing.T) {
 		denied(t, c, "the app truncates", `TRUNCATE session`)
 		denied(t, c, "the app creates a table", `CREATE TABLE sneaky (id int)`)
 		denied(t, c, "the app disables a trigger", `ALTER TABLE account DISABLE TRIGGER account_20_log_u`)
-		denied(t, c, "the app touches the version table", `SELECT * FROM plinth_schema_version`)
+		allowed(t, c, "the app reads the version table, to know what is pending", `SELECT count(*) FROM plinth_schema_version`)
+		denied(t, c, "the app writes the version table", `DELETE FROM plinth_schema_version`)
 		denied(t, c, "the app becomes the owner", `SET ROLE plinth_t_owner`)
 		r, err := shadowlog.Check(ctx, c, "plinth_t_owner")
 		if err != nil || !r.OK() || r.Err() != nil {

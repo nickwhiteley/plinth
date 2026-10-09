@@ -134,6 +134,32 @@ refused, because a down that drops a log table destroys audit history.
   that has applied a version this code doesn't have (`db.migration_unknown`: the code is older
   than the database).
 
+**The pending check (`db.Pending(ctx, q, streams...) (Status, error)`)** is how a product's
+server, as its runtime role, learns at boot whether every migration has been applied. It applies
+nothing, never writes, never changes `search_path` (it finds each version table on the
+connection's, as `Migrate` does), and takes no lock. `q` is a pool, connection or transaction.
+- **Per stream, `Status.Streams[i]` (a `StreamStatus`) reports,** each entry as `"<stream> NNNN_name"`:
+  - `Pending`: migrations the code embeds that the version table doesn't record, in order
+  - `Unknown`: recorded versions the code doesn't have (the code is older than the database),
+    named as the database recorded them
+  - `Changed`: recorded versions whose checksum differs from the code's file
+  - `Missing`: the version table doesn't exist, so nothing of the stream has been migrated. This
+    is distinct from "some pending", though `Pending` then lists every embedded migration.
+- **`Status.OK()`** is true when every stream has none of the above. **`Status.Pending()`** is
+  every stream's `Pending`, in order.
+- **`Status.Err()`** is nil when OK, and otherwise the problems joined (`errors.Join`), so
+  `errors.Is` finds each kind: `db.migration_changed` and `db.migration_unknown` as `Migrate`
+  raises them (with `stream` and `migration`), `db.migration_table_missing` (with `stream`), and
+  `db.migration_pending` (with `stream`, `count` and `next`). A missing table is not also reported
+  as pending.
+- **An unreadable version table is an error,** not a `Status`: no privilege (see `Grant`), no
+  connection. A stream with a malformed table name is `db.migration_name`, as in `Migrate`.
+- **The runtime role can do this** because `Grant` gives it `SELECT` on `internal` tables (below).
+  A version table holds a version, a name, a checksum and a time: no secret. This was chosen over
+  a `SECURITY DEFINER` function so that nothing is created by `Migrate` beyond the version table,
+  an existing deployment needs only its next `Grant`, and a product's own version table works
+  with no change to its manifest.
+
 **The shadow log (`0001_shadow`)** is spike 0.1's, schema- and role-free:
 - `log_exclusion` lives in the log schema, and `exclude_from_log(table, column, reason)`
   registers a column there.
@@ -161,7 +187,8 @@ refused, because a down that drops a log table destroys audit history.
     expires, and not logged, because the log would copy its personal data
   - `journal`: a history the product writes itself (a command log): appended to, never
     rewritten or deleted, and not logged, because it is already the record
-  - `internal`: a version table, nobody's but the owner's
+  - `internal`: a version table, the owner's to write. The runtime role may read it, for
+    `Pending`; no other role has access
 - **its secret columns,** which no read-only or extract role reads and the log never keeps
 - **`NoExtract`,** which withholds its log twin from the extract role. Settings use it: their
   ciphertext is kept in the log for history, but the warehouse has no use for it.
@@ -172,6 +199,10 @@ owner on every deploy:
   (`db.ConstraintFunctions`, today `valid_time_zone`). A product's setup revokes `EXECUTE` from
   `PUBLIC`, and a `CHECK` runs with the writer's privileges. `pgtest` revokes it the same way, so
   the role tests see what a deployment sees.
+- The runtime role gets `SELECT` on each `internal` table (a version table), and nothing else
+  there: it can't insert, update, delete or truncate a version row. Grant revokes everything first,
+  so it never inherits the owner's default privileges, and adds back only this. No other role has
+  any access to an internal table.
 - The runtime role gets `SELECT, INSERT, UPDATE` on every non-internal table (only `SELECT,
   INSERT` on an append-only or journal one), `DELETE` only on link, ephemeral and record ones, and `SELECT`
   on the log.
@@ -202,7 +233,9 @@ runtime role:
 - can't write, rewrite or delete the log
 - can't edit the exclusions
 - can't delete an entity
-- can't truncate, create a table, disable a trigger, read the version table, or become the owner
+- can't truncate, create a table, disable a trigger, write the version table, or become the owner
+- can read the version tables, so `db.Pending` works as that role, and the extract and read-only
+  roles can't
 
 It also proves the extract role can't see the app schema, and the read-only role can't read a
 secret column.

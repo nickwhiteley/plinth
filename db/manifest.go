@@ -34,7 +34,8 @@ const (
 	// never rewritten or deleted, like append-only ones, but not shadow-logged, because they are
 	// already the record. The warehouse reads them through an extract view.
 	Journal Class = "journal"
-	// Internal tables (a migration version table) are no role's business but the owner's.
+	// Internal tables (a migration version table) are the owner's. The runtime role may only read
+	// them, to know what is pending (Pending); no other role has any access.
 	Internal Class = "internal"
 )
 
@@ -146,6 +147,13 @@ func Grant(ctx context.Context, tx pgx.Tx, roles Roles, tables []Table) error {
 			}
 		}
 		if t.Class == Internal {
+			// A version table holds no secrets, and the server must be able to tell whether every
+			// migration was applied (Pending). Read only: the revoke above stands for everyone else.
+			if roles.App != "" {
+				if err := exec("GRANT SELECT ON " + table + " TO " + id(roles.App)); err != nil {
+					return err
+				}
+			}
 			continue
 		}
 		if roles.App != "" {
