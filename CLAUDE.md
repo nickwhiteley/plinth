@@ -11,6 +11,9 @@ This file guides Claude Code (claude.ai/code) when working in this repository.
   (`../furnituredesigner/PROGRESS.md`). Its decisions log records divergences.
 - **Bloomprint** (`../bloomprint/api/internal/`) is the source of the lifted packages. It is
   never changed by a lift.
+- **`backlog.md`** holds work for `plinth` itself, as `PL` items with Project Magic's meta line
+  (Furniture Magic's `CLAUDE.md`, *Backlog, plan and branch conventions*). An item that is part of
+  a change across repositories joins that repository's epic, such as `Epic: bloomprint:EP1`.
 
 ## Working rules
 

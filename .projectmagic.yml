@@ -1,0 +1,7 @@
+# Read by Project Magic (github.com/nickwhiteley/projectmagic), which shows this repository's
+# backlog, plan, branches and documents. Every key is optional; see its spec.md §4.
+name: plinth
+new_id_prefix: PL
+docs:
+  - README.md
+  - spec.md
