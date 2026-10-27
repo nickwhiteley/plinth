@@ -69,7 +69,7 @@ and an audit log the runtime role must be unable to write.
 Install the tool once:
 
 ```sh
-go install github.com/seethespark/pr-reviewer/cmd/review@latest
+go install github.com/seethespark/pr-reviewer/cmd/review@v0.1.14
 ```
 
 Run against the current branch (compares to `main`):
